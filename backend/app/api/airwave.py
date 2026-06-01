@@ -142,6 +142,7 @@ def simulate():
     trigger_id = (body.get("trigger_id") or "").upper().strip()
     rounds = body.get("rounds")
     macro_override = body.get("macro_override")
+    departure_date = body.get("departure_date") or None   # YYYY-MM-DD, optional
 
     # Validate
     errors = []
@@ -169,6 +170,7 @@ def simulate():
             destination=destination,
             trigger_id=trigger_id,
             macro_override=macro_override,
+            departure_date=departure_date,
         )
 
         # Step 2: run agent simulation
@@ -241,6 +243,7 @@ def seed_data():
     destination = (body.get("destination") or "JFK").upper()
     trigger_id = (body.get("trigger_id") or "FUEL_SPIKE").upper()
     macro_override = body.get("macro_override")
+    departure_date = body.get("departure_date") or None   # YYYY-MM-DD, optional
 
     try:
         seed = build_live_seed_sync(
@@ -248,6 +251,7 @@ def seed_data():
             destination=destination,
             trigger_id=trigger_id,
             macro_override=macro_override,
+            departure_date=departure_date,
         )
         return jsonify({
             "success": True,

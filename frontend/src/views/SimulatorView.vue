@@ -40,7 +40,7 @@
       <!-- Left: Controls -->
       <aside class="controls">
 
-        <!-- Route -->
+        <!-- Route + Date -->
         <section class="ctrl-section">
           <div class="section-label">ROUTE</div>
           <div class="route-inputs">
@@ -68,6 +68,20 @@
               <span v-if="destErr" class="field-err">3-letter IATA</span>
             </div>
           </div>
+
+          <!-- Departure date -->
+          <div class="date-field">
+            <label class="date-label">
+              TRAVEL DATE
+              <span class="date-hint">one-way · fares fetched for this date</span>
+            </label>
+            <input
+              type="date"
+              v-model="departureDate"
+              :min="minDate"
+              class="date-input"
+            />
+          </div>
         </section>
 
         <!-- Trigger -->
@@ -87,20 +101,21 @@
           </div>
         </section>
 
-        <!-- Rounds -->
-        <section class="ctrl-section rounds-row">
-          <div class="section-label">SIM ROUNDS</div>
+        <!-- Analysis Depth (was: SIM ROUNDS) -->
+        <section class="ctrl-section depth-section">
+          <div class="section-label">ANALYSIS DEPTH</div>
           <div class="rounds-control">
             <button class="rounds-btn" @click="rounds = Math.max(2, rounds - 1)">−</button>
             <span class="rounds-val">{{ rounds }}</span>
             <button class="rounds-btn" @click="rounds = Math.min(16, rounds + 1)">+</button>
-            <span class="rounds-hint">{{ rounds * 4 }} agent turns</span>
+            <span class="depth-badge" :class="depthClass">{{ depthLabel }}</span>
           </div>
+          <div class="depth-desc">{{ depthDesc }}</div>
         </section>
 
-        <!-- Seed preview -->
+        <!-- Live data preview (shown after seed loads or after simulation) -->
         <section class="ctrl-section" v-if="seed">
-          <div class="section-label">LIVE SEED DATA</div>
+          <div class="section-label">LIVE MARKET DATA</div>
           <div class="seed-grid">
             <div class="seed-row">
               <span class="seed-key">FARE</span>
@@ -127,16 +142,13 @@
 
         <!-- Action buttons -->
         <div class="action-row">
-          <button class="btn-secondary" @click="doSeed" :disabled="loading">
-            {{ seedLoading ? 'Loading...' : 'LOAD SEED' }}
-          </button>
           <button
             class="btn-primary"
             @click="doSimulate"
             :disabled="loading || !llmAvailable"
             :title="!llmAvailable ? 'LLM_API_KEY not configured' : ''"
           >
-            {{ simLoading ? 'Simulating...' : 'RUN SIMULATION' }}
+            {{ loading ? loadingLabel : 'PREDICT FARES' }}
           </button>
         </div>
 
@@ -155,10 +167,11 @@
         <!-- Empty state -->
         <div v-if="!result && !cascadeResult && !loading" class="empty-state">
           <div class="empty-icon">✈</div>
-          <div class="empty-title">Select a route and trigger</div>
+          <div class="empty-title">Select a route and macro trigger</div>
           <div class="empty-desc">
-            Load seed data to preview live prices, then run the simulation
-            to see how airline agents respond to the macro shock.
+            Pick a route, choose the market shock you want to model, then hit
+            <strong>Predict Fares</strong> — AirWave fetches live prices and
+            runs four AI airline agents through the scenario.
           </div>
           <div class="empty-routes">
             <span v-for="r in SAMPLE_ROUTES" :key="r" class="sample-route" @click="setRoute(r)">{{ r }}</span>
@@ -191,17 +204,17 @@
 
           <!-- Fare prediction card -->
           <div class="result-block fare-card">
-            <div class="fare-route">{{ result.route }}</div>
+            <div class="fare-route">{{ result.route }} · {{ displayDate }}</div>
             <div class="fare-row">
               <div class="fare-col">
-                <div class="fare-lbl">SEED FARE</div>
+                <div class="fare-lbl">TODAY'S FARE</div>
                 <div class="fare-val">${{ result.seed_fare }}</div>
               </div>
               <div class="fare-arrow" :class="result.fare_delta >= 0 ? 'pos' : 'neg'">
                 {{ result.fare_delta >= 0 ? '▲' : '▼' }}
               </div>
               <div class="fare-col">
-                <div class="fare-lbl">PREDICTED</div>
+                <div class="fare-lbl">PREDICTED IN {{ result.days_to_effect }}d</div>
                 <div class="fare-val" :class="result.fare_delta >= 0 ? 'pos' : 'neg'">
                   ${{ result.predicted_fare }}
                 </div>
@@ -211,7 +224,7 @@
                   {{ result.fare_delta >= 0 ? '+' : '' }}{{ result.fare_delta_pct }}%
                 </div>
                 <div class="fare-consensus">{{ result.agent_consensus.replace('_', ' ') }}</div>
-                <div class="fare-conf">{{ (result.confidence * 100).toFixed(0) }}% conf · T+{{ result.days_to_effect }}d</div>
+                <div class="fare-conf">{{ (result.confidence * 100).toFixed(0) }}% confidence</div>
               </div>
             </div>
           </div>
@@ -219,7 +232,7 @@
           <!-- Cascade chart -->
           <div class="result-block">
             <div class="block-header">
-              <span class="block-title">P&amp;L CASCADE</span>
+              <span class="block-title">P&amp;L CASCADE — HOW THE SHOCK SPREADS</span>
               <span class="block-tag">{{ result.trigger_id }}</span>
             </div>
             <CascadeChart :impacts="result.cascade_impacts" />
@@ -228,8 +241,15 @@
           <!-- Agent timeline -->
           <div class="result-block">
             <div class="block-header">
-              <span class="block-title">AGENT DECISIONS</span>
-              <span class="block-tag">{{ result.agent_actions.length }} turns</span>
+              <span class="block-title">HOW EACH MARKET PLAYER RESPONDED</span>
+              <span class="block-tag">{{ result.agent_actions.length }} decisions</span>
+            </div>
+            <div class="timeline-legend">
+              <span class="leg raise">▲ raise fares</span>
+              <span class="leg drop">▼ drop fares</span>
+              <span class="leg accel">⚡ book now</span>
+              <span class="leg delay">⏸ delay booking</span>
+              <span class="leg hold">— hold</span>
             </div>
             <div class="timeline">
               <div
@@ -241,7 +261,7 @@
                 <span class="tl-round">R{{ a.round }}</span>
                 <span class="tl-agent">{{ a.agent_name.split(' ')[0] }}</span>
                 <span class="tl-role">{{ shortRole(a.agent_id) }}</span>
-                <span class="tl-decision">{{ a.decision.replace(/_/g, ' ') }}</span>
+                <span class="tl-decision">{{ friendlyDecision(a.decision) }}</span>
                 <span class="tl-mag" :class="a.magnitude_pct >= 0 ? 'pos' : 'neg'">
                   {{ a.magnitude_pct >= 0 ? '+' : '' }}{{ a.magnitude_pct }}%
                 </span>
@@ -294,26 +314,71 @@ const TRIGGER_ICONS = {
 
 const SAMPLE_ROUTES = ['LHR→JFK', 'JFK→LAX', 'DXB→SIN', 'CDG→LHR', 'SYD→SIN']
 
+// ── Helpers: date defaults ─────────────────────────────────────
+function nextFriday () {
+  const d = new Date()
+  const day = d.getDay()
+  const daysUntilFriday = (5 - day + 7) % 7 || 7
+  d.setDate(d.getDate() + daysUntilFriday)
+  return d.toISOString().split('T')[0]   // YYYY-MM-DD
+}
+
+function todayStr () {
+  return new Date().toISOString().split('T')[0]
+}
+
 // ── State ──────────────────────────────────────────────────────
-const origin        = ref('LHR')
-const destination   = ref('JFK')
+const origin          = ref('LHR')
+const destination     = ref('JFK')
+const departureDate   = ref(nextFriday())
 const selectedTrigger = ref('FUEL_SPIKE')
-const rounds        = ref(8)
-const triggers      = ref([])
-const seed          = ref(null)
-const result        = ref(null)
-const cascadeResult = ref(null)
-const loading       = ref(false)
-const seedLoading   = ref(false)
-const simLoading    = ref(false)
-const errorMsg      = ref('')
-const llmAvailable  = ref(true)
-const loadingLabel  = ref('')
-const loadingSub    = ref('')
-const originErr     = ref(false)
-const destErr       = ref(false)
+const rounds          = ref(4)
+const triggers        = ref([])
+const seed            = ref(null)
+const result          = ref(null)
+const cascadeResult   = ref(null)
+const loading         = ref(false)
+const errorMsg        = ref('')
+const llmAvailable    = ref(true)
+const loadingLabel    = ref('')
+const loadingSub      = ref('')
+const originErr       = ref(false)
+const destErr         = ref(false)
+const minDate         = todayStr()
 
 const macro = reactive({ vix: '', wti: '', eur: '', source: '' })
+
+// ── Analysis depth labels ──────────────────────────────────────
+const depthLabel = computed(() => {
+  if (rounds.value <= 3)  return 'FAST'
+  if (rounds.value <= 7)  return 'STANDARD'
+  if (rounds.value <= 11) return 'DEEP'
+  return 'EXHAUSTIVE'
+})
+
+const depthClass = computed(() => {
+  if (rounds.value <= 3)  return 'depth-fast'
+  if (rounds.value <= 7)  return 'depth-std'
+  if (rounds.value <= 11) return 'depth-deep'
+  return 'depth-max'
+})
+
+const depthDesc = computed(() => {
+  if (rounds.value <= 3)
+    return `${rounds.value} rounds · agents make initial moves, limited back-and-forth`
+  if (rounds.value <= 7)
+    return `${rounds.value} rounds · agents react and counter-react, price converges`
+  if (rounds.value <= 11)
+    return `${rounds.value} rounds · full market equilibration, higher accuracy`
+  return `${rounds.value} rounds · maximum agent negotiation — slower but most precise`
+})
+
+// Formatted date shown in results
+const displayDate = computed(() => {
+  if (!departureDate.value) return ''
+  const d = new Date(departureDate.value + 'T12:00:00')
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+})
 
 // ── Init ──────────────────────────────────────────────────────
 onMounted(async () => {
@@ -322,7 +387,6 @@ onMounted(async () => {
     triggers.value = trData.data || []
     llmAvailable.value = health.llm !== false
 
-    // Populate macro ticker from health or pre-load seed
     if (health.macro_snapshot) {
       Object.assign(macro, health.macro_snapshot)
     }
@@ -331,76 +395,61 @@ onMounted(async () => {
   }
 })
 
-// ── Computed ───────────────────────────────────────────────────
+// ── Validation ─────────────────────────────────────────────────
 function validate () {
   originErr.value = !origin.value || origin.value.length !== 3
   destErr.value   = !destination.value || destination.value.length !== 3
   return !originErr.value && !destErr.value && selectedTrigger.value
 }
 
-// ── Actions ───────────────────────────────────────────────────
-async function doSeed () {
-  if (!validate()) return
-  errorMsg.value = ''
-  seedLoading.value = true
-  loading.value = true
-  loadingLabel.value = 'Fetching live market data...'
-  loadingSub.value = 'Google Flights · OpenSky · Yahoo Finance · FX Rates'
-  try {
-    const r = await fetchSeed({
-      origin: origin.value,
-      destination: destination.value,
-      trigger_id: selectedTrigger.value,
-    })
-    if (r.success) {
-      seed.value = r.data
-      // Update macro ticker
-      if (r.data.macro) {
-        macro.vix    = r.data.macro.vix
-        macro.wti    = r.data.macro.wti_price?.toFixed(2)
-        macro.eur    = r.data.macro.usd_eur?.toFixed(4)
-        macro.source = r.data.macro.source
-      }
-    } else {
-      errorMsg.value = r.error || 'Seed fetch failed'
-    }
-  } catch (e) {
-    errorMsg.value = e.response?.data?.error || e.message
-  } finally {
-    seedLoading.value = false
-    loading.value = false
-    loadingLabel.value = ''
-  }
-}
-
+// ── Main action: fetch live data, then run simulation ──────────
 async function doSimulate () {
   if (!validate()) return
   errorMsg.value = ''
   result.value = null
   cascadeResult.value = null
-  simLoading.value = true
+  seed.value = null
   loading.value = true
-  loadingLabel.value = 'Running multi-agent simulation...'
-  loadingSub.value = `${rounds.value} rounds · 4 agents · BFS cascade`
 
   try {
-    const r = await runSimulate({
+    // Phase 1: fetch live market data
+    loadingLabel.value = 'Fetching live market data...'
+    loadingSub.value = 'Google Flights · OpenSky · Yahoo Finance · FX Rates'
+
+    const seedResp = await fetchSeed({
+      origin: origin.value,
+      destination: destination.value,
+      trigger_id: selectedTrigger.value,
+      departure_date: departureDate.value,
+    })
+
+    if (seedResp.success) {
+      seed.value = seedResp.data
+      if (seedResp.data.macro) {
+        macro.vix    = seedResp.data.macro.vix
+        macro.wti    = seedResp.data.macro.wti_price?.toFixed(2)
+        macro.eur    = seedResp.data.macro.usd_eur?.toFixed(4)
+        macro.source = seedResp.data.macro.source
+      }
+    }
+
+    // Phase 2: run agent simulation
+    loadingLabel.value = 'Running AI simulation...'
+    loadingSub.value = `${rounds.value} rounds · 4 agents · Riley Chen · Marcus Webb · Priya Sharma · Sam Park`
+
+    const simResp = await runSimulate({
       origin: origin.value,
       destination: destination.value,
       trigger_id: selectedTrigger.value,
       rounds: rounds.value,
+      departure_date: departureDate.value,
     })
-    if (r.success) {
-      result.value = r.data
-      seed.value = null  // results replace seed
-      // Update macro ticker from simulation seed
-      if (r.data.cascade_impacts) {
-        cascadeResult.value = null
-      }
+
+    if (simResp.success) {
+      result.value = simResp.data
     } else {
-      errorMsg.value = r.error || 'Simulation failed'
-      // If LLM not available, fall back to cascade
-      if (r.error?.includes('LLM_API_KEY')) {
+      errorMsg.value = simResp.error || 'Simulation failed'
+      if (simResp.error?.includes('LLM_API_KEY')) {
         llmAvailable.value = false
         await doCascade()
       }
@@ -412,9 +461,9 @@ async function doSimulate () {
       await doCascade()
     }
   } finally {
-    simLoading.value = false
     loading.value = false
     loadingLabel.value = ''
+    loadingSub.value = ''
   }
 }
 
@@ -440,16 +489,33 @@ function tickClass (val, warn, critical) {
 }
 
 function decisionClass (d) {
-  if (d === 'raise_fares')       return 'dec-raise'
-  if (d === 'drop_fares')        return 'dec-drop'
-  if (d === 'delay_booking')     return 'dec-delay'
-  if (d === 'shift_carrier')     return 'dec-shift'
-  if (d === 'accelerate_booking')return 'dec-accel'
+  if (d === 'raise_fares')        return 'dec-raise'
+  if (d === 'drop_fares')         return 'dec-drop'
+  if (d === 'delay_booking')      return 'dec-delay'
+  if (d === 'shift_carrier')      return 'dec-shift'
+  if (d === 'accelerate_booking') return 'dec-accel'
   return 'dec-hold'
 }
 
+function friendlyDecision (d) {
+  const map = {
+    raise_fares:        'Raised fares',
+    hold_fares:         'Held fares',
+    drop_fares:         'Dropped fares',
+    delay_booking:      'Delayed booking',
+    accelerate_booking: 'Booked now',
+    shift_carrier:      'Switched carrier',
+  }
+  return map[d] || d.replace(/_/g, ' ')
+}
+
 function shortRole (id) {
-  const m = { lcc_rm: 'LCC RM', legacy_rm: 'LEGACY', corporate_buyer: 'CORP', leisure_traveler: 'LEISURE' }
+  const m = {
+    lcc_rm:           'LCC RM',
+    legacy_rm:        'LEGACY',
+    corporate_buyer:  'CORP',
+    leisure_traveler: 'LEISURE',
+  }
   return m[id] || id
 }
 
@@ -564,6 +630,7 @@ function renderMarkdown (md) {
   display: flex;
   align-items: flex-end;
   gap: 8px;
+  margin-bottom: 12px;
 }
 .iata-field {
   flex: 1;
@@ -595,6 +662,33 @@ function renderMarkdown (md) {
 .field-err { font-size: 9px; color: var(--neg); }
 .route-arrow { color: var(--txt-dim); font-size: 14px; padding-bottom: 10px; }
 
+/* Date field */
+.date-field { display: flex; flex-direction: column; gap: 4px; }
+.date-label {
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  color: var(--txt-dim);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.date-hint { font-size: 8.5px; color: var(--txt-faint); letter-spacing: 0.5px; text-transform: none; }
+.date-input {
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  color: var(--txt);
+  padding: 7px 10px;
+  font-size: 12px;
+  font-family: var(--mono);
+  letter-spacing: 0.5px;
+  border-radius: var(--radius);
+  width: 100%;
+  outline: none;
+  transition: border-color 0.2s;
+  color-scheme: dark;
+}
+.date-input:focus { border-color: var(--acc); }
+
 /* Trigger grid */
 .trigger-grid {
   display: grid;
@@ -617,7 +711,7 @@ function renderMarkdown (md) {
   transition: all 0.15s;
   cursor: pointer;
 }
-.trigger-btn:hover { border-color: var(--border-2); color: var(--txt); background: var(--surface-2); }
+.trigger-btn:hover { color: var(--txt); }
 .trigger-btn.active {
   border-color: var(--acc);
   color: var(--acc);
@@ -626,9 +720,9 @@ function renderMarkdown (md) {
 .trigger-icon { font-size: 15px; }
 .trigger-label { font-size: 9px; letter-spacing: 0.5px; text-align: center; }
 
-/* Rounds */
-.rounds-row { padding-top: 12px; padding-bottom: 12px; }
-.rounds-control { display: flex; align-items: center; gap: 8px; }
+/* Analysis depth */
+.depth-section { padding-bottom: 14px; }
+.rounds-control { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .rounds-btn {
   width: 26px; height: 26px;
   background: var(--surface-2);
@@ -638,6 +732,7 @@ function renderMarkdown (md) {
   font-size: 14px;
   display: flex; align-items: center; justify-content: center;
   transition: border-color 0.15s;
+  cursor: pointer;
 }
 .rounds-btn:hover { border-color: var(--acc); color: var(--acc); }
 .rounds-val {
@@ -647,7 +742,19 @@ function renderMarkdown (md) {
   min-width: 24px;
   text-align: center;
 }
-.rounds-hint { font-size: 10px; color: var(--txt-dim); margin-left: 4px; }
+.depth-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  padding: 2px 8px;
+  border-radius: 2px;
+  margin-left: 4px;
+}
+.depth-fast { color: var(--pos); background: rgba(0,230,118,0.12); border: 1px solid rgba(0,230,118,0.3); }
+.depth-std  { color: var(--acc); background: var(--acc-dim); border: 1px solid rgba(0,172,193,0.3); }
+.depth-deep { color: var(--warn); background: rgba(255,145,0,0.1); border: 1px solid rgba(255,145,0,0.3); }
+.depth-max  { color: var(--neg); background: rgba(255,59,48,0.1); border: 1px solid rgba(255,59,48,0.3); }
+.depth-desc { font-size: 10px; color: var(--txt-faint); line-height: 1.5; }
 
 /* Seed grid */
 .seed-grid { display: flex; flex-direction: column; gap: 6px; }
@@ -660,9 +767,7 @@ function renderMarkdown (md) {
 .seed-key { color: var(--txt-dim); min-width: 80px; font-size: 9px; letter-spacing: 1px; }
 .seed-val { color: var(--txt); flex: 1; font-weight: 600; }
 .seed-val.acc { color: var(--acc); }
-.seed-src { font-size: 9px; padding: 1px 5px; border-radius: 2px; }
-.seed-src { color: var(--pos); border: 1px solid rgba(0,230,118,0.25); }
-.seed-src[class*="synthetic"] { color: var(--txt-dim); border-color: var(--border-2); }
+.seed-src { font-size: 9px; padding: 1px 5px; border-radius: 2px; color: var(--pos); border: 1px solid rgba(0,230,118,0.25); }
 
 /* Action row */
 .action-row {
@@ -670,35 +775,23 @@ function renderMarkdown (md) {
   display: flex;
   gap: 8px;
 }
-.btn-primary, .btn-secondary {
+.btn-primary {
   flex: 1;
-  padding: 10px 0;
+  padding: 11px 0;
   border-radius: var(--radius);
   font-size: 11px;
   font-family: var(--mono);
   font-weight: 700;
   letter-spacing: 1px;
-  border: 1px solid;
+  border: 1px solid var(--acc);
+  background: var(--acc);
+  color: #000;
   transition: all 0.15s;
   white-space: nowrap;
+  cursor: pointer;
 }
-.btn-primary {
-  background: var(--acc);
-  border-color: var(--acc);
-  color: #000;
-}
-.btn-primary:hover:not(:disabled) {
-  background: #00cdd9;
-  border-color: #00cdd9;
-}
+.btn-primary:hover:not(:disabled) { background: #00cdd9; border-color: #00cdd9; }
 .btn-primary:disabled { opacity: 0.35; cursor: not-allowed; }
-.btn-secondary {
-  background: transparent;
-  border-color: var(--border-2);
-  color: var(--txt-dim);
-}
-.btn-secondary:hover:not(:disabled) { border-color: var(--acc); color: var(--acc); }
-.btn-secondary:disabled { opacity: 0.35; cursor: not-allowed; }
 
 .llm-warning {
   margin: 10px 20px 0;
@@ -742,7 +835,8 @@ function renderMarkdown (md) {
 }
 .empty-icon  { font-size: 40px; opacity: 0.2; }
 .empty-title { font-size: 14px; font-weight: 600; color: var(--txt); }
-.empty-desc  { font-size: 12px; max-width: 300px; line-height: 1.6; }
+.empty-desc  { font-size: 12px; max-width: 300px; line-height: 1.65; }
+.empty-desc strong { color: var(--acc); }
 .empty-routes { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 8px; }
 .sample-route {
   font-size: 11px;
@@ -774,7 +868,7 @@ function renderMarkdown (md) {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .loading-label { font-size: 13px; font-weight: 600; color: var(--txt); letter-spacing: 0.5px; }
-.loading-sub   { font-size: 10px; color: var(--txt-dim); }
+.loading-sub   { font-size: 10px; color: var(--txt-dim); text-align: center; max-width: 280px; line-height: 1.5; }
 
 /* Result blocks */
 .result-block {
@@ -829,6 +923,20 @@ function renderMarkdown (md) {
 .result-block :deep(.cascade-chart) { padding: 12px 16px 8px; }
 .cascade-note { padding: 8px 16px 12px; font-size: 10px; color: var(--warn); }
 
+/* Timeline legend */
+.timeline-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.leg { font-size: 9px; letter-spacing: 0.5px; color: var(--txt-faint); }
+.leg.raise { color: var(--pos); }
+.leg.drop  { color: var(--neg); }
+.leg.accel { color: var(--acc); }
+.leg.delay { color: var(--warn); }
+
 /* Agent timeline */
 .timeline { display: flex; flex-direction: column; }
 .timeline-row {
@@ -851,7 +959,7 @@ function renderMarkdown (md) {
 .tl-round  { color: var(--txt-dim); font-size: 9px; }
 .tl-agent  { color: var(--txt); font-weight: 600; }
 .tl-role   { color: var(--txt-dim); font-size: 9px; letter-spacing: 0.5px; }
-.tl-decision { color: var(--txt); text-transform: uppercase; letter-spacing: 0.5px; }
+.tl-decision { color: var(--txt); }
 .tl-mag    { font-weight: 700; font-size: 11px; }
 .tl-mag.pos { color: var(--pos); }
 .tl-mag.neg { color: var(--neg); }
@@ -898,5 +1006,7 @@ function renderMarkdown (md) {
   .body { flex-direction: column; }
   .macro-ticker { display: none; }
   .results { padding: 12px; }
+  .timeline-row { grid-template-columns: 26px 56px 48px 1fr; }
+  .tl-mag, .tl-reason { display: none; }
 }
 </style>

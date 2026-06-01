@@ -156,11 +156,14 @@ async def fetch_live_fare(
     origin: str,
     destination: str,
     client: httpx.AsyncClient,
+    departure_date: Optional[str] = None,
 ) -> FareData:
     key = Config.SERPAPI_KEY
     if not key or key.startswith("FILL_IN"):
         logger.debug("SERPAPI_KEY not set — using synthetic fare")
         return _synthetic_fare(origin, destination)
+
+    outbound = departure_date or _next_friday()
 
     try:
         resp = await client.get(
@@ -169,7 +172,7 @@ async def fetch_live_fare(
                 "engine": "google_flights",
                 "departure_id": origin,
                 "arrival_id": destination,
-                "outbound_date": _next_friday(),
+                "outbound_date": outbound,
                 "type": "2",           # 1=round-trip (requires return_date), 2=one-way
                 "currency": "USD",
                 "hl": "en",
@@ -394,13 +397,15 @@ async def build_live_seed(
     destination: str,
     trigger_id: str,
     macro_override: Optional[dict] = None,
+    departure_date: Optional[str] = None,
 ) -> LiveSeed:
     """
     Fetch all data sources concurrently and return a unified LiveSeed.
     Falls back gracefully when API keys are absent.
+    departure_date: YYYY-MM-DD for the outbound flight. Defaults to next Friday.
     """
     async with httpx.AsyncClient() as client:
-        fare_task = fetch_live_fare(origin, destination, client)
+        fare_task = fetch_live_fare(origin, destination, client, departure_date)
         demand_task = fetch_route_demand(origin, destination, client)
         history_task = fetch_fare_history(origin, destination, client)
         macro_task = fetch_macro(client)
@@ -436,9 +441,12 @@ def build_live_seed_sync(
     destination: str,
     trigger_id: str,
     macro_override: Optional[dict] = None,
+    departure_date: Optional[str] = None,
 ) -> LiveSeed:
     """Synchronous wrapper for use inside Flask routes."""
-    return asyncio.run(build_live_seed(origin, destination, trigger_id, macro_override))
+    return asyncio.run(
+        build_live_seed(origin, destination, trigger_id, macro_override, departure_date)
+    )
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
