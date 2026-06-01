@@ -36,7 +36,7 @@ def create_app(config_class=Config):
     
     if should_log_startup:
         logger.info("=" * 50)
-        logger.info("MiroFish Backend 启动中...")
+        logger.info("AirWave Backend starting...")
         logger.info("=" * 50)
     
     # 启用CORS
@@ -62,19 +62,21 @@ def create_app(config_class=Config):
         logger.debug(f"响应: {response.status_code}")
         return response
     
-    # 注册蓝图
+    # Register blueprints
     from .api import graph_bp, simulation_bp, report_bp
+    from .api.airwave import airwave_bp
     app.register_blueprint(graph_bp, url_prefix='/api/graph')
     app.register_blueprint(simulation_bp, url_prefix='/api/simulation')
     app.register_blueprint(report_bp, url_prefix='/api/report')
-    
-    # 健康检查
+    app.register_blueprint(airwave_bp, url_prefix='/api/airwave')
+
+    # Health check
     @app.route('/health')
     def health():
-        return {'status': 'ok', 'service': 'MiroFish Backend'}
+        return {'status': 'ok', 'service': 'AirWave — Airline Fare Intelligence Engine'}
     
     if should_log_startup:
-        logger.info("MiroFish Backend 启动完成")
+        logger.info("AirWave Backend ready")
     
     return app
 

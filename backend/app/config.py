@@ -44,24 +44,22 @@ class Config:
     DEFAULT_CHUNK_SIZE = 500  # 默认切块大小
     DEFAULT_CHUNK_OVERLAP = 50  # 默认重叠大小
     
-    # OASIS模拟配置
-    OASIS_DEFAULT_MAX_ROUNDS = int(os.environ.get('OASIS_DEFAULT_MAX_ROUNDS', '10'))
-    OASIS_SIMULATION_DATA_DIR = os.path.join(os.path.dirname(__file__), '../uploads/simulations')
-    
-    # OASIS平台可用动作配置
-    OASIS_TWITTER_ACTIONS = [
-        'CREATE_POST', 'LIKE_POST', 'REPOST', 'FOLLOW', 'DO_NOTHING', 'QUOTE_POST'
-    ]
-    OASIS_REDDIT_ACTIONS = [
-        'LIKE_POST', 'DISLIKE_POST', 'CREATE_POST', 'CREATE_COMMENT',
-        'LIKE_COMMENT', 'DISLIKE_COMMENT', 'SEARCH_POSTS', 'SEARCH_USER',
-        'TREND', 'REFRESH', 'DO_NOTHING', 'FOLLOW', 'MUTE'
-    ]
-    
-    # Report Agent配置
+    # AirWave data pipeline keys
+    SERPAPI_KEY = os.environ.get('SERPAPI_KEY')
+    TRAVELPAYOUTS_KEY = os.environ.get('TRAVELPAYOUTS_KEY')
+
+    # AirWave simulation config
+    SIMULATION_DATA_DIR = os.path.join(os.path.dirname(__file__), '../uploads/simulations')
+    SIMULATION_DEFAULT_ROUNDS = int(os.environ.get('SIMULATION_DEFAULT_ROUNDS', '8'))
+    SIMULATION_TEMPERATURE = float(os.environ.get('SIMULATION_TEMPERATURE', '0.7'))
+
+    # Report Agent config
     REPORT_AGENT_MAX_TOOL_CALLS = int(os.environ.get('REPORT_AGENT_MAX_TOOL_CALLS', '5'))
     REPORT_AGENT_MAX_REFLECTION_ROUNDS = int(os.environ.get('REPORT_AGENT_MAX_REFLECTION_ROUNDS', '2'))
     REPORT_AGENT_TEMPERATURE = float(os.environ.get('REPORT_AGENT_TEMPERATURE', '0.5'))
+
+    # Legacy alias for code still referencing old name
+    OASIS_SIMULATION_DATA_DIR = SIMULATION_DATA_DIR
     
     @classmethod
     def validate(cls) -> list[str]:
