@@ -285,19 +285,18 @@ Legacy last move: {market_state['legacy_last_move']*100:+.0f}%
 OTHER AGENTS' RECENT MOVES:
 {recent_summary}
 
-Respond in JSON only:
-{{
-  "decision": "raise_fares|hold_fares|drop_fares|delay_booking|accelerate_booking|shift_carrier",
-  "magnitude": <float between -0.30 and 0.30, fraction of current price>,
-  "reasoning": "<1–2 sentences max>",
-  "confidence": <float 0.0–1.0>
-}}"""
+You MUST respond with valid JSON and nothing else. Example:
+{{"decision": "raise_fares", "magnitude": 0.12, "reasoning": "Fuel spike increases CASK 20%, passing 70% to fares.", "confidence": 0.85}}
+
+Valid decisions: raise_fares, hold_fares, drop_fares, delay_booking, accelerate_booking, shift_carrier
+magnitude must be a number between -0.30 and 0.30 (fraction of price)
+confidence must be a number between 0.0 and 1.0"""
 
         try:
             response = self.llm.chat_json(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=Config.SIMULATION_TEMPERATURE,
-                max_tokens=256,
+                max_tokens=4096,  # Gemini 2.5 Flash counts thinking tokens against budget
             )
             decision = str(response.get("decision", "hold_fares"))
             magnitude = float(response.get("magnitude", 0.0))

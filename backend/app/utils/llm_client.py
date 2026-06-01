@@ -57,13 +57,40 @@ class LLMClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
-        
+
         if response_format:
             kwargs["response_format"] = response_format
-        
+
         response = self.client.chat.completions.create(**kwargs)
-        content = response.choices[0].message.content
-        # 部分模型（如MiniMax M2.5）会在content中包含<think>思考内容，需要移除
+        msg = response.choices[0].message
+        content = msg.content
+
+        # Gemini 2.5 Flash (thinking model) sometimes returns content=None via
+        # the OpenAI-compat layer when no response_format is specified.
+        # Retry once with JSON mode to coerce a real response, then unwrap it.
+        if content is None and response_format is None:
+            kwargs["response_format"] = {"type": "json_object"}
+            # Append instruction so the model wraps output in {"text": "..."}
+            patched = list(messages)
+            patched[-1] = {
+                "role": patched[-1]["role"],
+                "content": patched[-1]["content"] + '\n\nRespond with JSON: {"text": "<your full response here>"}',
+            }
+            kwargs["messages"] = patched
+            retry = self.client.chat.completions.create(**kwargs)
+            retry_content = retry.choices[0].message.content or ""
+            try:
+                parsed = json.loads(retry_content)
+                content = parsed.get("text") or retry_content
+            except Exception:
+                content = retry_content
+
+        if content is None:
+            content = ""
+        if not isinstance(content, str):
+            content = str(content)
+
+        # Strip inline <think>…</think> blocks exposed by some models
         content = re.sub(r'<think>[\s\S]*?</think>', '', content).strip()
         return content
     
@@ -90,14 +117,33 @@ class LLMClient:
             max_tokens=max_tokens,
             response_format={"type": "json_object"}
         )
-        # 清理markdown代码块标记
-        cleaned_response = response.strip()
-        cleaned_response = re.sub(r'^```(?:json)?\s*\n?', '', cleaned_response, flags=re.IGNORECASE)
-        cleaned_response = re.sub(r'\n?```\s*$', '', cleaned_response)
-        cleaned_response = cleaned_response.strip()
+        # Try to parse JSON from the response, handling common model quirks:
+        # 1. Response wrapped in ```json ... ``` code block
+        # 2. Preamble prose before the JSON ("Here is the JSON requested:")
+        # 3. Mix of both
 
+        # First, try direct parse of the stripped response
+        cleaned = response.strip()
         try:
-            return json.loads(cleaned_response)
+            return json.loads(cleaned)
         except json.JSONDecodeError:
-            raise ValueError(f"LLM返回的JSON格式无效: {cleaned_response}")
+            pass
+
+        # Extract JSON from a ```json...``` code block (anywhere in the string)
+        cb_match = re.search(r'```(?:json)?\s*\n?([\s\S]*?)\n?```', cleaned, re.IGNORECASE)
+        if cb_match:
+            try:
+                return json.loads(cb_match.group(1).strip())
+            except json.JSONDecodeError:
+                pass
+
+        # Extract the first complete {...} object from anywhere in the response
+        brace_match = re.search(r'\{[\s\S]*\}', cleaned)
+        if brace_match:
+            try:
+                return json.loads(brace_match.group(0))
+            except json.JSONDecodeError:
+                pass
+
+        raise ValueError(f"LLM返回的JSON格式无效: {cleaned}")
 
