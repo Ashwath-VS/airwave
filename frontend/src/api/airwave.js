@@ -2,7 +2,7 @@ import axios from 'axios'
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:5001',
-  timeout: 120_000,  // simulations can take up to 2 minutes
+  timeout: 360_000,  // simulations can take up to 6 minutes (deep analysis)
 })
 
 export const getHealth   = ()        => api.get('/api/airwave/health').then(r => r.data)

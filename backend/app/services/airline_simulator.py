@@ -239,6 +239,21 @@ class AirlineSimulator:
             for n in top_impacts
         )
 
+        # Optional weather disruption block
+        weather_block = ""
+        if seed.disruption:
+            d = seed.disruption
+            ow = d.origin_weather
+            dw = d.dest_weather
+            weather_block = (
+                f"\nWEATHER DISRUPTION (on-time probability {d.on_time_probability*100:.0f}%):\n"
+                f"  Origin {ow.airport_code}: {ow.weather_emoji} {ow.weather_desc}, "
+                f"wind {ow.wind_speed_kmh:.0f} km/h, disruption score {ow.disruption_score}/100 ({ow.risk_level})\n"
+                f"  Dest {dw.airport_code}: {dw.weather_emoji} {dw.weather_desc}, "
+                f"wind {dw.wind_speed_kmh:.0f} km/h, disruption score {dw.disruption_score}/100 ({dw.risk_level})\n"
+                f"  Primary risk: {d.primary_risk_factor}"
+            )
+
         return f"""ROUTE: {seed.route_label}
 MACRO SHOCK: {seed.trigger_id}
 CURRENT FARE: ${seed.fare.current_price_usd:.0f} (source: {seed.fare.source})
@@ -247,7 +262,7 @@ DEMAND INDEX: {seed.demand.demand_index:.2f} ({seed.demand.flights_last_24h} fli
 MACRO: VIX={seed.macro.vix}, WTI=${seed.macro.wti_price:.0f}, USD/EUR={seed.macro.usd_eur}
 
 P&L CASCADE TOP IMPACTS:
-{impact_lines}"""
+{impact_lines}{weather_block}"""
 
     def _agent_turn(
         self,

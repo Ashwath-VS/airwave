@@ -1,1012 +1,729 @@
 <template>
-  <div class="sim-layout">
+  <div class="aw-root">
 
-    <!-- ── Header ──────────────────────────────────────────────── -->
-    <header class="top-bar">
-      <div class="brand">
-        <span class="brand-icon">✈</span>
-        AIRWAVE
-        <span class="brand-sub">Fare Intelligence Engine</span>
-      </div>
-
-      <div class="macro-ticker" v-if="macro.vix">
-        <span class="tick" :class="tickClass(macro.vix, 25, 35)">
-          VIX <strong>{{ macro.vix }}</strong>
-        </span>
-        <span class="tick-sep">·</span>
-        <span class="tick">
-          WTI <strong>${{ macro.wti }}</strong>
-        </span>
-        <span class="tick-sep">·</span>
-        <span class="tick">
-          EUR <strong>{{ macro.eur }}</strong>
-        </span>
-        <span class="tick-sep">·</span>
-        <span class="tick-source" :class="macro.source === 'live' ? 'live' : 'stale'">
-          {{ macro.source }}
-        </span>
-      </div>
-
-      <div class="header-actions">
-        <a href="https://s-ashwath.netlify.app/traveltech" target="_blank" class="back-link">
-          ← Portfolio
-        </a>
+    <!-- ── Header ──────────────────────────────────────────────────── -->
+    <header class="aw-header">
+      <div class="aw-logo">
+        <span class="aw-logo-mark">✦</span>
+        <span class="aw-logo-name">AirWave</span>
+        <span class="aw-logo-tag">Fare Intelligence</span>
       </div>
     </header>
 
-    <!-- ── Body ────────────────────────────────────────────────── -->
-    <main class="body">
+    <main class="aw-main">
 
-      <!-- Left: Controls -->
-      <aside class="controls">
+      <!-- Search card -->
+      <section class="aw-search-card">
 
-        <!-- Route + Date -->
-        <section class="ctrl-section">
-          <div class="section-label">ROUTE</div>
-          <div class="route-inputs">
-            <div class="iata-field">
-              <label>FROM</label>
-              <input
-                v-model="origin"
-                maxlength="3"
-                placeholder="LHR"
-                @input="origin = origin.toUpperCase()"
-                :class="{ error: originErr }"
-              />
-              <span v-if="originErr" class="field-err">3-letter IATA</span>
-            </div>
-            <span class="route-arrow">→</span>
-            <div class="iata-field">
-              <label>TO</label>
-              <input
-                v-model="destination"
-                maxlength="3"
-                placeholder="JFK"
-                @input="destination = destination.toUpperCase()"
-                :class="{ error: destErr }"
-              />
-              <span v-if="destErr" class="field-err">3-letter IATA</span>
+        <!-- Trip type toggle -->
+        <div class="trip-toggle">
+          <button :class="['trip-btn', tripType === 'one_way' && 'active']"
+            @click="tripType = 'one_way'; returnDate = ''">One-way</button>
+          <button :class="['trip-btn', tripType === 'round_trip' && 'active']"
+            @click="tripType = 'round_trip'">Round-trip</button>
+        </div>
+
+        <!-- Search fields row -->
+        <div class="search-row">
+          <div class="search-field">
+            <label class="field-label">From</label>
+            <input v-model="origin" class="field-input code-input" placeholder="LHR"
+              maxlength="3" @input="origin = origin.toUpperCase()" spellcheck="false" />
+            <span v-if="originName" class="field-hint">{{ originName }}</span>
+          </div>
+
+          <button class="swap-btn" @click="swapRoutes" title="Swap">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4"/>
+            </svg>
+          </button>
+
+          <div class="search-field">
+            <label class="field-label">To</label>
+            <input v-model="destination" class="field-input code-input" placeholder="JFK"
+              maxlength="3" @input="destination = destination.toUpperCase()" spellcheck="false" />
+            <span v-if="destName" class="field-hint">{{ destName }}</span>
+          </div>
+
+          <div class="search-field">
+            <label class="field-label">Depart</label>
+            <input v-model="departureDate" class="field-input" type="date" :min="today" />
+          </div>
+
+          <div v-if="tripType === 'round_trip'" class="search-field">
+            <label class="field-label">Return</label>
+            <input v-model="returnDate" class="field-input" type="date" :min="departureDate || today" />
+          </div>
+
+          <div class="search-field">
+            <label class="field-label">Cabin</label>
+            <select v-model="cabinClass" class="field-input">
+              <option :value="1">Economy</option>
+              <option :value="2">Prem. Economy</option>
+              <option :value="3">Business</option>
+              <option :value="4">First</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Config row -->
+        <div class="config-row">
+          <div class="search-field">
+            <label class="field-label">Market shock</label>
+            <select v-model="triggerId" class="field-input trigger-select">
+              <option v-for="t in triggers" :key="t.id" :value="t.id">{{ t.label }}</option>
+            </select>
+          </div>
+
+          <div class="search-field">
+            <label class="field-label">Analysis depth</label>
+            <div class="depth-tabs">
+              <button v-for="d in depths" :key="d.key"
+                :class="['depth-tab', depth === d.key && 'active']"
+                @click="depth = d.key">{{ d.label }}</button>
             </div>
           </div>
 
-          <!-- Departure date -->
-          <div class="date-field">
-            <label class="date-label">
-              TRAVEL DATE
-              <span class="date-hint">one-way · fares fetched for this date</span>
-            </label>
-            <input
-              type="date"
-              v-model="departureDate"
-              :min="minDate"
-              class="date-input"
-            />
-          </div>
-        </section>
-
-        <!-- Trigger -->
-        <section class="ctrl-section">
-          <div class="section-label">MACRO TRIGGER</div>
-          <div class="trigger-grid">
-            <button
-              v-for="t in triggers"
-              :key="t.id"
-              class="trigger-btn"
-              :class="{ active: selectedTrigger === t.id }"
-              @click="selectedTrigger = t.id"
-            >
-              <span class="trigger-icon">{{ TRIGGER_ICONS[t.id] || '⚡' }}</span>
-              <span class="trigger-label">{{ t.label }}</span>
+          <div style="margin-left:auto">
+            <button class="predict-btn" :disabled="isLoading || !canPredict" @click="runSimulation">
+              <span v-if="!isLoading">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"
+                  style="margin-right:6px;vertical-align:-2px">
+                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                </svg>Predict Fares
+              </span>
+              <span v-else class="btn-loading">
+                <span class="spinner"></span>{{ loadingMsg }}
+              </span>
             </button>
           </div>
-        </section>
-
-        <!-- Analysis Depth (was: SIM ROUNDS) -->
-        <section class="ctrl-section depth-section">
-          <div class="section-label">ANALYSIS DEPTH</div>
-          <div class="rounds-control">
-            <button class="rounds-btn" @click="rounds = Math.max(2, rounds - 1)">−</button>
-            <span class="rounds-val">{{ rounds }}</span>
-            <button class="rounds-btn" @click="rounds = Math.min(16, rounds + 1)">+</button>
-            <span class="depth-badge" :class="depthClass">{{ depthLabel }}</span>
-          </div>
-          <div class="depth-desc">{{ depthDesc }}</div>
-        </section>
-
-        <!-- Live data preview (shown after seed loads or after simulation) -->
-        <section class="ctrl-section" v-if="seed">
-          <div class="section-label">LIVE MARKET DATA</div>
-          <div class="seed-grid">
-            <div class="seed-row">
-              <span class="seed-key">FARE</span>
-              <span class="seed-val acc">${{ seed.fare.current_price_usd }}</span>
-              <span class="seed-src">{{ seed.fare.source }}</span>
-            </div>
-            <div class="seed-row">
-              <span class="seed-key">DEMAND IDX</span>
-              <span class="seed-val">{{ seed.demand.demand_index }}</span>
-              <span class="seed-src">{{ seed.demand.source }}</span>
-            </div>
-            <div class="seed-row">
-              <span class="seed-key">BASELINE</span>
-              <span class="seed-val">${{ seed.history.baseline_price_usd }}</span>
-              <span class="seed-src">{{ seed.history.source }}</span>
-            </div>
-            <div class="seed-row">
-              <span class="seed-key">VIX / WTI</span>
-              <span class="seed-val">{{ seed.macro.vix }} / ${{ seed.macro.wti_price }}</span>
-              <span class="seed-src">{{ seed.macro.source }}</span>
-            </div>
-          </div>
-        </section>
-
-        <!-- Action buttons -->
-        <div class="action-row">
-          <button
-            class="btn-primary"
-            @click="doSimulate"
-            :disabled="loading || !llmAvailable"
-            :title="!llmAvailable ? 'LLM_API_KEY not configured' : ''"
-          >
-            {{ loading ? loadingLabel : 'PREDICT FARES' }}
-          </button>
         </div>
+      </section>
 
-        <div v-if="!llmAvailable" class="llm-warning">
-          ⚠ LLM_API_KEY not set — add Gemini key to backend .env to run simulations.
-          Cascade-only mode is still available.
-        </div>
+      <!-- Error -->
+      <div v-if="error" class="error-bar">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/>
+          <line x1="9" y1="9" x2="15" y2="15"/>
+        </svg>{{ error }}
+      </div>
 
-        <div v-if="errorMsg" class="error-box">{{ errorMsg }}</div>
+      <!-- Results -->
+      <transition name="fade-up">
+        <div v-if="result" class="results-grid">
 
-      </aside>
+          <!-- LEFT: flight card + weather -->
+          <div class="col-left">
 
-      <!-- Right: Results -->
-      <section class="results" :class="{ 'results-empty': !result && !cascadeResult }">
-
-        <!-- Empty state -->
-        <div v-if="!result && !cascadeResult && !loading" class="empty-state">
-          <div class="empty-icon">✈</div>
-          <div class="empty-title">Select a route and macro trigger</div>
-          <div class="empty-desc">
-            Pick a route, choose the market shock you want to model, then hit
-            <strong>Predict Fares</strong> — AirWave fetches live prices and
-            runs four AI airline agents through the scenario.
-          </div>
-          <div class="empty-routes">
-            <span v-for="r in SAMPLE_ROUTES" :key="r" class="sample-route" @click="setRoute(r)">{{ r }}</span>
-          </div>
-        </div>
-
-        <!-- Loading state -->
-        <div v-if="loading" class="loading-state">
-          <div class="spinner"></div>
-          <div class="loading-label">{{ loadingLabel }}</div>
-          <div class="loading-sub">{{ loadingSub }}</div>
-        </div>
-
-        <!-- Cascade-only result (fast, no LLM) -->
-        <template v-if="cascadeResult && !result">
-          <div class="result-block">
-            <div class="block-header">
-              <span class="block-title">P&amp;L CASCADE</span>
-              <span class="block-tag">{{ cascadeResult.trigger_id }}</span>
-            </div>
-            <CascadeChart :impacts="cascadeResult.impacts" />
-            <div class="cascade-note">
-              Agent simulation requires LLM_API_KEY. Showing cascade model only.
-            </div>
-          </div>
-        </template>
-
-        <!-- Full simulation result -->
-        <template v-if="result">
-
-          <!-- Fare prediction card -->
-          <div class="result-block fare-card">
-            <div class="fare-route">{{ result.route }} · {{ displayDate }}</div>
-            <div class="fare-row">
-              <div class="fare-col">
-                <div class="fare-lbl">TODAY'S FARE</div>
-                <div class="fare-val">${{ result.seed_fare }}</div>
-              </div>
-              <div class="fare-arrow" :class="result.fare_delta >= 0 ? 'pos' : 'neg'">
-                {{ result.fare_delta >= 0 ? '▲' : '▼' }}
-              </div>
-              <div class="fare-col">
-                <div class="fare-lbl">PREDICTED IN {{ result.days_to_effect }}d</div>
-                <div class="fare-val" :class="result.fare_delta >= 0 ? 'pos' : 'neg'">
-                  ${{ result.predicted_fare }}
+            <!-- Flight card -->
+            <div class="flight-card">
+              <div class="fc-header">
+                <div class="route-pill">
+                  <span class="rc">{{ result.route.split(' → ')[0] }}</span>
+                  <svg width="28" height="12" viewBox="0 0 40 14" fill="none" class="ra">
+                    <path d="M0 7h34M28 1l6 6-6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    <circle cx="4" cy="7" r="2.5" fill="currentColor"/>
+                  </svg>
+                  <span class="rc">{{ result.route.split(' → ')[1] }}</span>
                 </div>
-              </div>
-              <div class="fare-col right">
-                <div class="fare-delta" :class="result.fare_delta >= 0 ? 'pos' : 'neg'">
-                  {{ result.fare_delta >= 0 ? '+' : '' }}{{ result.fare_delta_pct }}%
-                </div>
-                <div class="fare-consensus">{{ result.agent_consensus.replace('_', ' ') }}</div>
-                <div class="fare-conf">{{ (result.confidence * 100).toFixed(0) }}% confidence</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Cascade chart -->
-          <div class="result-block">
-            <div class="block-header">
-              <span class="block-title">P&amp;L CASCADE — HOW THE SHOCK SPREADS</span>
-              <span class="block-tag">{{ result.trigger_id }}</span>
-            </div>
-            <CascadeChart :impacts="result.cascade_impacts" />
-          </div>
-
-          <!-- Agent timeline -->
-          <div class="result-block">
-            <div class="block-header">
-              <span class="block-title">HOW EACH MARKET PLAYER RESPONDED</span>
-              <span class="block-tag">{{ result.agent_actions.length }} decisions</span>
-            </div>
-            <div class="timeline-legend">
-              <span class="leg raise">▲ raise fares</span>
-              <span class="leg drop">▼ drop fares</span>
-              <span class="leg accel">⚡ book now</span>
-              <span class="leg delay">⏸ delay booking</span>
-              <span class="leg hold">— hold</span>
-            </div>
-            <div class="timeline">
-              <div
-                v-for="(a, i) in result.agent_actions"
-                :key="i"
-                class="timeline-row"
-                :class="decisionClass(a.decision)"
-              >
-                <span class="tl-round">R{{ a.round }}</span>
-                <span class="tl-agent">{{ a.agent_name.split(' ')[0] }}</span>
-                <span class="tl-role">{{ shortRole(a.agent_id) }}</span>
-                <span class="tl-decision">{{ friendlyDecision(a.decision) }}</span>
-                <span class="tl-mag" :class="a.magnitude_pct >= 0 ? 'pos' : 'neg'">
-                  {{ a.magnitude_pct >= 0 ? '+' : '' }}{{ a.magnitude_pct }}%
+                <span :class="['trip-badge', result.fare_details?.trip_type === 'round_trip' ? 'badge-rt' : 'badge-ow']">
+                  {{ result.fare_details?.trip_type === 'round_trip' ? 'Round-trip' : 'One-way' }}
                 </span>
-                <span class="tl-reason">{{ a.reasoning }}</span>
+              </div>
+
+              <div class="fc-body">
+                <!-- Airline -->
+                <div class="airline-col">
+                  <div class="logo-wrap">
+                    <img v-if="result.fare_details?.airline_logo"
+                      :src="result.fare_details.airline_logo"
+                      :alt="result.fare_details.airline_name"
+                      class="airline-logo"
+                      @error="e => e.target.style.display='none'" />
+                    <div v-else class="logo-placeholder">{{ airlineInitials }}</div>
+                  </div>
+                  <span class="airline-name">{{ result.fare_details?.airline_name || 'Best Available' }}</span>
+                  <span v-if="result.fare_details?.flight_number" class="flt-no">
+                    {{ result.fare_details.flight_number }}
+                  </span>
+                </div>
+
+                <!-- Times -->
+                <div class="times-col">
+                  <div class="t-block">
+                    <span class="t-time">{{ result.fare_details?.departure_time || '—' }}</span>
+                    <span class="t-iata">{{ result.route.split(' → ')[0] }}</span>
+                    <span class="t-apt">{{ trunc(result.fare_details?.origin_airport_name, 20) }}</span>
+                    <span class="t-date">{{ fmtDate(result.fare_details?.departure_date) }}</span>
+                  </div>
+                  <div class="dur-col">
+                    <div class="dur-line"></div>
+                    <span class="dur-text">{{ fmtDur(result.fare_details?.duration_min) }}</span>
+                    <span :class="['stops-pill', result.fare_details?.is_direct ? 'direct' : 'stops']">
+                      {{ result.fare_details?.is_direct ? 'Nonstop'
+                        : `${result.fare_details?.num_stops} stop${result.fare_details?.num_stops > 1 ? 's' : ''}` }}
+                    </span>
+                  </div>
+                  <div class="t-block t-right">
+                    <span class="t-time">{{ result.fare_details?.arrival_time || '—' }}<sup
+                      v-if="result.fare_details?.arrives_next_day" class="nd">+1</sup></span>
+                    <span class="t-iata">{{ result.route.split(' → ')[1] }}</span>
+                    <span class="t-apt">{{ trunc(result.fare_details?.dest_airport_name, 20) }}</span>
+                  </div>
+                </div>
+
+                <!-- Fare -->
+                <div class="fare-col">
+                  <span class="fare-lbl">Current fare</span>
+                  <span class="fare-val">${{ result.seed_fare.toLocaleString() }}</span>
+                  <span class="cabin-pill">{{ cabinLabel }}</span>
+                </div>
               </div>
             </div>
-          </div>
 
-          <!-- Narrative report -->
-          <div class="result-block">
-            <div class="block-header">
-              <span class="block-title">INTELLIGENCE BRIEF</span>
-              <span class="block-tag">{{ result.simulation_id }}</span>
+            <!-- Weather card -->
+            <div v-if="result.disruption" class="weather-card" :class="`risk-${result.disruption.delay_risk}`">
+              <div class="wc-title">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>
+                </svg>
+                Weather Disruption
+                <span :class="['risk-pill', `rp-${result.disruption.delay_risk}`]">
+                  {{ result.disruption.delay_risk.toUpperCase() }}
+                </span>
+              </div>
+
+              <div class="wx-pair">
+                <div class="wx-airport" v-for="wx in [result.disruption.origin_weather, result.disruption.dest_weather]" :key="wx.airport_code">
+                  <span class="wx-em">{{ wx.weather_emoji }}</span>
+                  <div class="wx-info">
+                    <span class="wx-cd">{{ wx.airport_code }}</span>
+                    <span class="wx-ds">{{ wx.weather_desc }}</span>
+                    <div class="wx-stats">
+                      <span>💨 {{ wx.wind_speed_kmh }}km/h</span>
+                      <span>🌧 {{ wx.precipitation_prob }}%</span>
+                      <span>👁 {{ wx.visibility_km }}km</span>
+                    </div>
+                  </div>
+                  <div class="wx-ring">
+                    <svg width="42" height="42" viewBox="0 0 42 42">
+                      <circle cx="21" cy="21" r="17" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="4"/>
+                      <circle cx="21" cy="21" r="17" fill="none" :stroke="riskColor(wx.risk_level)"
+                        stroke-width="4" stroke-linecap="round"
+                        :stroke-dasharray="`${wx.disruption_score * 1.068} 106.8`"
+                        transform="rotate(-90 21 21)"/>
+                    </svg>
+                    <span class="wx-sc">{{ wx.disruption_score }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="wx-summary">
+                <div class="ot-row">
+                  <span class="ot-lbl">On-time probability</span>
+                  <div class="ot-bar"><div class="ot-fill"
+                    :style="{width:`${result.disruption.on_time_probability*100}%`, background:ontimeColor}"></div></div>
+                  <span class="ot-pct">{{ Math.round(result.disruption.on_time_probability * 100) }}%</span>
+                </div>
+                <p class="wx-primary">⚠ {{ result.disruption.primary_risk_factor }}</p>
+                <span class="wx-fc">Forecast confidence: {{ result.disruption.forecast_confidence?.toUpperCase() }}</span>
+              </div>
             </div>
-            <div class="narrative" v-html="renderMarkdown(result.narrative)"></div>
+
           </div>
 
-          <!-- Data sources -->
-          <div class="result-block sources-block">
-            <div class="block-header"><span class="block-title">DATA SOURCES</span></div>
-            <div class="sources-grid">
-              <span v-for="(v, k) in result.data_sources" :key="k" class="source-chip" :class="v">
-                {{ k }}: {{ v }}
+          <!-- RIGHT: AI prediction -->
+          <div class="col-right">
+
+            <!-- Prediction strip -->
+            <div class="pred-card" :class="`cs-${result.agent_consensus}`">
+              <div class="pred-header">
+                <span class="pred-lbl">AI Fare Prediction</span>
+                <span class="sim-id">{{ result.simulation_id }}</span>
+              </div>
+              <div class="pred-body">
+                <div class="pred-main">
+                  <span class="pred-sublbl">Predicted fare</span>
+                  <span class="pred-val">${{ result.predicted_fare.toLocaleString() }}</span>
+                  <span :class="['delta-badge', result.fare_delta >= 0 ? 'du' : 'dd']">
+                    {{ result.fare_delta >= 0 ? '▲' : '▼' }} {{ Math.abs(result.fare_delta_pct) }}%
+                  </span>
+                </div>
+                <div class="pred-meta">
+                  <div class="pm-row">
+                    <span class="pm-lbl">Consensus</span>
+                    <span class="pm-val">{{ consensusLabel }}</span>
+                  </div>
+                  <div class="pm-row">
+                    <span class="pm-lbl">Confidence</span>
+                    <div class="conf-bar"><div class="conf-fill"
+                      :style="{width:`${result.confidence*100}%`}"></div></div>
+                    <span class="pm-val">{{ Math.round(result.confidence*100) }}%</span>
+                  </div>
+                  <div class="pm-row">
+                    <span class="pm-lbl">Days to effect</span>
+                    <span class="pm-val">T+{{ result.days_to_effect }}d</span>
+                  </div>
+                  <div class="pm-row">
+                    <span class="pm-lbl">Shock</span>
+                    <span class="pm-val trigger-chip">{{ result.trigger_id.replace(/_/g,' ') }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Agent decisions -->
+            <div class="agents-card">
+              <div class="card-title">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                  <circle cx="9" cy="7" r="4"/>
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
+                </svg>
+                Agent Decisions
+              </div>
+              <div class="agents-list">
+                <div v-for="a in visibleActions" :key="`${a.round}-${a.agent_id}`" class="agent-row">
+                  <div class="agent-av" :style="{background: agentColor(a.agent_id)}">{{ a.agent_name[0] }}</div>
+                  <div class="agent-body">
+                    <div class="agent-hdr">
+                      <span class="a-name">{{ a.agent_name }}</span>
+                      <span class="a-round">R{{ a.round }}</span>
+                      <span :class="['dec-chip', `dc-${a.decision}`]">{{ a.decision.replace(/_/g,' ') }}</span>
+                      <span :class="['a-mag', a.magnitude_pct >= 0 ? 'pos' : 'neg']">
+                        {{ a.magnitude_pct >= 0 ? '+' : '' }}{{ a.magnitude_pct }}%
+                      </span>
+                    </div>
+                    <p class="a-reason">{{ a.reasoning }}</p>
+                  </div>
+                </div>
+              </div>
+              <button v-if="result.agent_actions.length > 4" class="show-more"
+                @click="showAll = !showAll">
+                {{ showAll ? 'Show less' : `Show all ${result.agent_actions.length} moves` }}
+              </button>
+            </div>
+
+            <!-- Narrative -->
+            <div class="narrative-card">
+              <div class="card-title">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                  <line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+                </svg>
+                Analysis Report
+              </div>
+              <p class="narrative">{{ result.narrative }}</p>
+            </div>
+
+            <!-- Cascade -->
+            <div class="cascade-card">
+              <div class="card-title">P&amp;L Cascade Impacts</div>
+              <div class="cascade-list">
+                <div v-for="(imp, key) in topCascade" :key="key" class="cascade-row">
+                  <span class="c-node">{{ key.replace(/_/g,' ') }}</span>
+                  <div class="c-bar-wrap">
+                    <div class="c-bar-fill" :style="{
+                      width: `${Math.min(100, Math.abs(imp.impact)*200)}%`,
+                      background: imp.impact >= 0 ? 'var(--up)' : 'var(--down)'
+                    }"></div>
+                  </div>
+                  <span :class="['c-val', imp.impact >= 0 ? 'pos' : 'neg']">
+                    {{ imp.impact >= 0 ? '+' : '' }}{{ (imp.impact*100).toFixed(0) }}%
+                  </span>
+                  <span class="c-days">T+{{ imp.days_to_effect }}d</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Sources -->
+            <div class="sources-row">
+              <span v-for="(src, key) in result.data_sources" :key="key"
+                :class="['src-chip', src === 'synthetic' ? 'cs' : 'cl']">
+                {{ key }}: {{ src }}
               </span>
             </div>
+
           </div>
+        </div>
+      </transition>
 
-        </template>
+      <!-- Empty state -->
+      <div v-if="!result && !isLoading" class="empty-state">
+        <div class="empty-icon">✦</div>
+        <h2 class="empty-h">Predict how fares will move</h2>
+        <p class="empty-p">Enter a route, choose a market shock, and four AI agents simulate the airline pricing response in real time.</p>
+        <div class="example-row">
+          <button v-for="ex in examples" :key="ex.label" class="example-chip" @click="applyExample(ex)">
+            {{ ex.label }}
+          </button>
+        </div>
+      </div>
 
-      </section>
     </main>
-
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
-import { getTriggers, fetchSeed, runCascade, runSimulate, getHealth } from '../api/airwave.js'
-import CascadeChart from '../components/CascadeChart.vue'
+import { ref, computed, onMounted } from 'vue'
+import { getTriggers, runSimulate } from '@/api/airwave.js'
 
-// ── Constants ─────────────────────────────────────────────────
-const TRIGGER_ICONS = {
-  FUEL_SPIKE:        '⛽',
-  DEMAND_COLLAPSE:   '📉',
-  CAPACITY_DUMP:     '✈',
-  ROUTE_CANCELLATION:'🚫',
-  EXCHANGE_RATE:     '💱',
-  DISRUPTION_EVENT:  '⚠',
+const origin = ref('LHR')
+const destination = ref('JFK')
+const tripType = ref('one_way')
+const departureDate = ref('')
+const returnDate = ref('')
+const cabinClass = ref(1)
+const triggerId = ref('FUEL_SPIKE')
+const depth = ref('standard')
+const triggers = ref([])
+const result = ref(null)
+const error = ref('')
+const isLoading = ref(false)
+const showAll = ref(false)
+const today = new Date().toISOString().split('T')[0]
+
+const depths = [
+  { key: 'fast', label: 'Fast', rounds: 2 },
+  { key: 'standard', label: 'Standard', rounds: 5 },
+  { key: 'deep', label: 'Deep', rounds: 8 },
+  { key: 'exhaustive', label: 'Exhaustive', rounds: 12 },
+]
+
+const examples = [
+  { label: 'LHR → JFK  Fuel Spike', origin: 'LHR', destination: 'JFK', trigger: 'FUEL_SPIKE' },
+  { label: 'DXB → SIN  Demand Collapse', origin: 'DXB', destination: 'SIN', trigger: 'DEMAND_COLLAPSE' },
+  { label: 'CDG → NRT  Exchange Rate', origin: 'CDG', destination: 'NRT', trigger: 'EXCHANGE_RATE' },
+  { label: 'LAX → ORD  Disruption', origin: 'LAX', destination: 'ORD', trigger: 'DISRUPTION_EVENT' },
+]
+
+const airportNames = {
+  LHR:'London Heathrow',LGW:'London Gatwick',JFK:'New York JFK',LAX:'Los Angeles',
+  ORD:"Chicago O'Hare",ATL:'Atlanta',DFW:'Dallas/Fort Worth',SFO:'San Francisco',
+  BOS:'Boston Logan',MIA:'Miami',EWR:'Newark',FRA:'Frankfurt',MUC:'Munich',
+  CDG:'Paris CDG',AMS:'Amsterdam',ZRH:'Zurich',BRU:'Brussels',FCO:'Rome Fiumicino',
+  MAD:'Madrid Barajas',BCN:'Barcelona',LIS:'Lisbon',ATH:'Athens',DXB:'Dubai',
+  AUH:'Abu Dhabi',HKG:'Hong Kong',SIN:'Singapore Changi',NRT:'Tokyo Narita',
+  HND:'Tokyo Haneda',ICN:'Seoul Incheon',PEK:'Beijing Capital',PVG:'Shanghai Pudong',
+  BOM:'Mumbai',DEL:'Delhi IGI',SYD:'Sydney',MEL:'Melbourne',
+  YYZ:'Toronto Pearson',YVR:'Vancouver',
 }
 
-const SAMPLE_ROUTES = ['LHR→JFK', 'JFK→LAX', 'DXB→SIN', 'CDG→LHR', 'SYD→SIN']
+const loadingMsgs = [
+  'Fetching live fares…','Checking weather…','Running cascade model…',
+  'Riley Chen: LCC strategy…','Marcus Webb: hedge position…',
+  'Priya Sharma: corporate policy…','Sam Park: price elasticity…',
+  'Synthesising prediction…',
+]
+const loadingMsg = ref(loadingMsgs[0])
+let _lt = null
 
-// ── Helpers: date defaults ─────────────────────────────────────
-function nextFriday () {
-  const d = new Date()
-  const day = d.getDay()
-  const daysUntilFriday = (5 - day + 7) % 7 || 7
-  d.setDate(d.getDate() + daysUntilFriday)
-  return d.toISOString().split('T')[0]   // YYYY-MM-DD
-}
+const originName = computed(() => airportNames[origin.value] || '')
+const destName = computed(() => airportNames[destination.value] || '')
+const canPredict = computed(() => origin.value.length === 3 && destination.value.length === 3 && triggerId.value)
+const cabinLabel = computed(() => ({1:'Economy',2:'Prem. Economy',3:'Business',4:'First'})[cabinClass.value] || 'Economy')
+const airlineInitials = computed(() => {
+  const n = result.value?.fare_details?.airline_name || ''
+  return n.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase() || 'AA'
+})
+const consensusLabel = computed(() => ({
+  strong_raise:'⬆ Strong raise', moderate_raise:'↗ Moderate raise',
+  hold:'→ Hold', moderate_drop:'↘ Moderate drop', strong_drop:'⬇ Strong drop',
+})[result.value?.agent_consensus] || result.value?.agent_consensus || '')
 
-function todayStr () {
-  return new Date().toISOString().split('T')[0]
-}
-
-// ── State ──────────────────────────────────────────────────────
-const origin          = ref('LHR')
-const destination     = ref('JFK')
-const departureDate   = ref(nextFriday())
-const selectedTrigger = ref('FUEL_SPIKE')
-const rounds          = ref(4)
-const triggers        = ref([])
-const seed            = ref(null)
-const result          = ref(null)
-const cascadeResult   = ref(null)
-const loading         = ref(false)
-const errorMsg        = ref('')
-const llmAvailable    = ref(true)
-const loadingLabel    = ref('')
-const loadingSub      = ref('')
-const originErr       = ref(false)
-const destErr         = ref(false)
-const minDate         = todayStr()
-
-const macro = reactive({ vix: '', wti: '', eur: '', source: '' })
-
-// ── Analysis depth labels ──────────────────────────────────────
-const depthLabel = computed(() => {
-  if (rounds.value <= 3)  return 'FAST'
-  if (rounds.value <= 7)  return 'STANDARD'
-  if (rounds.value <= 11) return 'DEEP'
-  return 'EXHAUSTIVE'
+const ontimeColor = computed(() => {
+  const p = result.value?.disruption?.on_time_probability || 1
+  if (p >= 0.8) return '#22c55e'
+  if (p >= 0.6) return '#f59e0b'
+  if (p >= 0.4) return '#f97316'
+  return '#ef4444'
 })
 
-const depthClass = computed(() => {
-  if (rounds.value <= 3)  return 'depth-fast'
-  if (rounds.value <= 7)  return 'depth-std'
-  if (rounds.value <= 11) return 'depth-deep'
-  return 'depth-max'
+const visibleActions = computed(() =>
+  showAll.value ? result.value?.agent_actions || []
+  : (result.value?.agent_actions || []).slice(0, 4)
+)
+
+const topCascade = computed(() => {
+  if (!result.value?.cascade_impacts) return {}
+  const e = Object.entries(result.value.cascade_impacts)
+  e.sort((a,b) => Math.abs(b[1].impact) - Math.abs(a[1].impact))
+  return Object.fromEntries(e.slice(0,6))
 })
 
-const depthDesc = computed(() => {
-  if (rounds.value <= 3)
-    return `${rounds.value} rounds · agents make initial moves, limited back-and-forth`
-  if (rounds.value <= 7)
-    return `${rounds.value} rounds · agents react and counter-react, price converges`
-  if (rounds.value <= 11)
-    return `${rounds.value} rounds · full market equilibration, higher accuracy`
-  return `${rounds.value} rounds · maximum agent negotiation — slower but most precise`
-})
-
-// Formatted date shown in results
-const displayDate = computed(() => {
-  if (!departureDate.value) return ''
-  const d = new Date(departureDate.value + 'T12:00:00')
-  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-})
-
-// ── Init ──────────────────────────────────────────────────────
 onMounted(async () => {
-  try {
-    const [trData, health] = await Promise.all([getTriggers(), getHealth()])
-    triggers.value = trData.data || []
-    llmAvailable.value = health.llm !== false
-
-    if (health.macro_snapshot) {
-      Object.assign(macro, health.macro_snapshot)
-    }
-  } catch (e) {
-    console.warn('Init error', e)
-  }
+  try { const r = await getTriggers(); if (r.success) triggers.value = r.data } catch {}
 })
 
-// ── Validation ─────────────────────────────────────────────────
-function validate () {
-  originErr.value = !origin.value || origin.value.length !== 3
-  destErr.value   = !destination.value || destination.value.length !== 3
-  return !originErr.value && !destErr.value && selectedTrigger.value
+function swapRoutes() { [origin.value, destination.value] = [destination.value, origin.value] }
+function applyExample(ex) { origin.value=ex.origin; destination.value=ex.destination; triggerId.value=ex.trigger }
+function fmtDate(d) {
+  if (!d) return ''
+  try { return new Date(d+'T12:00:00').toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'}) }
+  catch { return d }
 }
+function fmtDur(m) { if (!m) return ''; return `${Math.floor(m/60)}h ${m%60}m` }
+function trunc(s, n) { if (!s) return ''; return s.length > n ? s.slice(0,n-1)+'…' : s }
+function riskColor(lvl) { return {low:'#22c55e',moderate:'#f59e0b',high:'#f97316',severe:'#ef4444'}[lvl]||'#6b7280' }
+function agentColor(id) { return {lcc_rm:'#6366f1',legacy_rm:'#0ea5e9',corporate_buyer:'#8b5cf6',leisure_traveler:'#10b981'}[id]||'#6b7280' }
 
-// ── Main action: fetch live data, then run simulation ──────────
-async function doSimulate () {
-  if (!validate()) return
-  errorMsg.value = ''
-  result.value = null
-  cascadeResult.value = null
-  seed.value = null
-  loading.value = true
-
+async function runSimulation() {
+  if (!canPredict.value || isLoading.value) return
+  error.value = ''; result.value = null; isLoading.value = true
+  let i = 0; loadingMsg.value = loadingMsgs[0]
+  _lt = setInterval(() => { i=(i+1)%loadingMsgs.length; loadingMsg.value=loadingMsgs[i] }, 3500)
+  const rounds = {fast:2,standard:5,deep:8,exhaustive:12}[depth.value]
   try {
-    // Phase 1: fetch live market data
-    loadingLabel.value = 'Fetching live market data...'
-    loadingSub.value = 'Google Flights · OpenSky · Yahoo Finance · FX Rates'
-
-    const seedResp = await fetchSeed({
-      origin: origin.value,
-      destination: destination.value,
-      trigger_id: selectedTrigger.value,
-      departure_date: departureDate.value,
+    const res = await runSimulate({
+      origin: origin.value, destination: destination.value,
+      trigger_id: triggerId.value,
+      departure_date: departureDate.value || undefined,
+      return_date: returnDate.value || undefined,
+      trip_type: tripType.value, cabin_class: cabinClass.value, rounds,
     })
-
-    if (seedResp.success) {
-      seed.value = seedResp.data
-      if (seedResp.data.macro) {
-        macro.vix    = seedResp.data.macro.vix
-        macro.wti    = seedResp.data.macro.wti_price?.toFixed(2)
-        macro.eur    = seedResp.data.macro.usd_eur?.toFixed(4)
-        macro.source = seedResp.data.macro.source
-      }
-    }
-
-    // Phase 2: run agent simulation
-    loadingLabel.value = 'Running AI simulation...'
-    loadingSub.value = `${rounds.value} rounds · 4 agents · Riley Chen · Marcus Webb · Priya Sharma · Sam Park`
-
-    const simResp = await runSimulate({
-      origin: origin.value,
-      destination: destination.value,
-      trigger_id: selectedTrigger.value,
-      rounds: rounds.value,
-      departure_date: departureDate.value,
-    })
-
-    if (simResp.success) {
-      result.value = simResp.data
-    } else {
-      errorMsg.value = simResp.error || 'Simulation failed'
-      if (simResp.error?.includes('LLM_API_KEY')) {
-        llmAvailable.value = false
-        await doCascade()
-      }
-    }
-  } catch (e) {
-    errorMsg.value = e.response?.data?.error || e.message
-    if (errorMsg.value?.includes('LLM_API_KEY')) {
-      llmAvailable.value = false
-      await doCascade()
-    }
-  } finally {
-    loading.value = false
-    loadingLabel.value = ''
-    loadingSub.value = ''
-  }
-}
-
-async function doCascade () {
-  try {
-    const r = await runCascade({ trigger_id: selectedTrigger.value })
-    if (r.success) cascadeResult.value = r.data
-  } catch {}
-}
-
-// ── Helpers ───────────────────────────────────────────────────
-function setRoute (str) {
-  const parts = str.split('→')
-  origin.value = parts[0]
-  destination.value = parts[1]
-}
-
-function tickClass (val, warn, critical) {
-  const n = parseFloat(val)
-  if (n >= critical) return 'crisis'
-  if (n >= warn) return 'stressed'
-  return ''
-}
-
-function decisionClass (d) {
-  if (d === 'raise_fares')        return 'dec-raise'
-  if (d === 'drop_fares')         return 'dec-drop'
-  if (d === 'delay_booking')      return 'dec-delay'
-  if (d === 'shift_carrier')      return 'dec-shift'
-  if (d === 'accelerate_booking') return 'dec-accel'
-  return 'dec-hold'
-}
-
-function friendlyDecision (d) {
-  const map = {
-    raise_fares:        'Raised fares',
-    hold_fares:         'Held fares',
-    drop_fares:         'Dropped fares',
-    delay_booking:      'Delayed booking',
-    accelerate_booking: 'Booked now',
-    shift_carrier:      'Switched carrier',
-  }
-  return map[d] || d.replace(/_/g, ' ')
-}
-
-function shortRole (id) {
-  const m = {
-    lcc_rm:           'LCC RM',
-    legacy_rm:        'LEGACY',
-    corporate_buyer:  'CORP',
-    leisure_traveler: 'LEISURE',
-  }
-  return m[id] || id
-}
-
-function renderMarkdown (md) {
-  if (!md) return ''
-  return md
-    .replace(/^## (.+)$/gm, '<h3>$1</h3>')
-    .replace(/^# (.+)$/gm,  '<h2>$1</h2>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n\n/g, '</p><p>')
-    .replace(/^/, '<p>')
-    .replace(/$/, '</p>')
+    if (res.success) result.value = res.data
+    else error.value = res.error || 'Simulation failed'
+  } catch (e) { error.value = e.message || 'Network error' }
+  finally { isLoading.value = false; clearInterval(_lt) }
 }
 </script>
 
 <style scoped>
-/* ── Layout ──────────────────────────────────────────────────── */
-.sim-layout {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  overflow: hidden;
+.aw-root {
+  --bg: #07080d; --sf: #0f1117; --sf2: #161b27;
+  --bd: rgba(255,255,255,0.07); --bdh: rgba(255,255,255,0.14);
+  --ink: #e8eaf0; --ink2: #8b93a8; --ink3: #565e72;
+  --ac: #4f8ef7; --acg: rgba(79,142,247,0.15);
+  --up: #ef4444; --down: #22c55e; --hold: #f59e0b;
+  --r: 12px; --rs: 8px;
+  min-height: 100vh; background: var(--bg); color: var(--ink);
+  font-family: 'Inter', system-ui, sans-serif; font-size: 14px; line-height: 1.5;
 }
 
-.body {
-  flex: 1;
-  display: flex;
-  overflow: hidden;
-}
+/* Header */
+.aw-header { padding: 18px 32px; border-bottom: 1px solid var(--bd); display:flex; align-items:center; }
+.aw-logo { display:flex; align-items:center; gap:10px; }
+.aw-logo-mark { font-size:20px; color:var(--ac); }
+.aw-logo-name { font-size:18px; font-weight:700; letter-spacing:-0.4px; }
+.aw-logo-tag { font-size:11px; color:var(--ink3); background:var(--sf2); border:1px solid var(--bd);
+  padding:2px 8px; border-radius:20px; letter-spacing:.5px; text-transform:uppercase; }
 
-/* ── Header ──────────────────────────────────────────────────── */
-.top-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 52px;
-  padding: 0 20px;
-  border-bottom: 1px solid var(--border);
-  background: rgba(10, 10, 10, 0.95);
-  backdrop-filter: blur(8px);
-  position: relative;
-  z-index: 10;
-  flex-shrink: 0;
-}
+/* Main */
+.aw-main { max-width:1200px; margin:0 auto; padding:28px 20px 64px; }
 
-.brand {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-weight: 800;
-  font-size: 15px;
-  letter-spacing: 2px;
-  color: var(--acc);
-}
-.brand-icon { font-size: 13px; }
-.brand-sub  { font-size: 10px; font-weight: 400; letter-spacing: 1px; color: var(--txt-dim); margin-left: 4px; }
+/* Search card */
+.aw-search-card { background:var(--sf); border:1px solid var(--bd); border-radius:var(--r); padding:22px; margin-bottom:20px; }
 
-.macro-ticker {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 11px;
-  color: var(--txt-dim);
-}
-.tick strong { color: var(--txt); font-weight: 600; }
-.tick.stressed strong { color: var(--warn); }
-.tick.crisis strong   { color: var(--neg); }
-.tick-sep { color: var(--border-2); }
-.tick-source { font-size: 9px; letter-spacing: 1px; padding: 1px 5px; border-radius: 2px; }
-.tick-source.live  { color: var(--pos); border: 1px solid rgba(0,230,118,0.3); }
-.tick-source.stale { color: var(--warn); border: 1px solid var(--warn-dim); }
+.trip-toggle { display:flex; gap:4px; margin-bottom:18px; }
+.trip-btn { padding:6px 16px; border-radius:20px; border:1px solid var(--bd); background:transparent;
+  color:var(--ink2); font-size:13px; cursor:pointer; transition:all .15s; font-family:inherit; }
+.trip-btn:hover { border-color:var(--bdh); color:var(--ink); }
+.trip-btn.active { background:var(--acg); border-color:var(--ac); color:var(--ac); }
 
-.header-actions { display: flex; align-items: center; }
-.back-link {
-  font-size: 11px;
-  color: var(--txt-dim);
-  text-decoration: none;
-  letter-spacing: 0.5px;
-  transition: color 0.2s;
-}
-.back-link:hover { color: var(--acc); }
+.search-row { display:flex; align-items:flex-end; gap:10px; flex-wrap:wrap; }
+.search-field { display:flex; flex-direction:column; gap:4px; }
+.field-label { font-size:11px; color:var(--ink3); letter-spacing:.6px; text-transform:uppercase; font-weight:500; }
+.field-input { background:var(--sf2); border:1px solid var(--bd); border-radius:var(--rs); color:var(--ink);
+  padding:10px 12px; font-size:14px; font-family:inherit; outline:none; transition:border-color .15s; }
+.field-input:focus { border-color:var(--ac); }
+.field-input option { background:var(--sf2); }
+.code-input { font-size:22px; font-weight:700; letter-spacing:2px; text-align:center; padding:10px 8px; width:76px; }
+.field-hint { font-size:11px; color:var(--ink3); white-space:nowrap; }
+.swap-btn { background:var(--sf2); border:1px solid var(--bd); border-radius:50%; width:36px; height:36px;
+  display:flex; align-items:center; justify-content:center; cursor:pointer; color:var(--ink2);
+  flex-shrink:0; margin-bottom:4px; transition:all .15s; }
+.swap-btn:hover { border-color:var(--ac); color:var(--ac); }
+.trigger-select { min-width:200px; }
 
-/* ── Controls (left panel) ───────────────────────────────────── */
-.controls {
-  width: 300px;
-  min-width: 280px;
-  flex-shrink: 0;
-  border-right: 1px solid var(--border);
-  background: var(--surface);
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  overflow-y: auto;
-  padding: 0 0 24px;
-}
+.config-row { display:flex; align-items:flex-end; gap:14px; margin-top:18px; flex-wrap:wrap; }
+.depth-tabs { display:flex; gap:2px; background:var(--sf2); border:1px solid var(--bd); border-radius:var(--rs); padding:3px; }
+.depth-tab { padding:6px 13px; border-radius:6px; border:none; background:transparent; color:var(--ink2);
+  font-size:12px; font-family:inherit; cursor:pointer; transition:all .15s; }
+.depth-tab:hover { color:var(--ink); }
+.depth-tab.active { background:var(--ac); color:#fff; }
 
-.ctrl-section {
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
-}
+.predict-btn { padding:11px 26px; background:var(--ac); border:none; border-radius:var(--rs);
+  color:#fff; font-size:14px; font-weight:600; font-family:inherit; cursor:pointer;
+  display:flex; align-items:center; gap:4px; transition:opacity .15s, transform .1s; white-space:nowrap; }
+.predict-btn:hover:not(:disabled) { opacity:.9; transform:translateY(-1px); }
+.predict-btn:disabled { opacity:.45; cursor:not-allowed; transform:none; }
+.btn-loading { display:flex; align-items:center; gap:8px; }
+.spinner { width:13px; height:13px; border:2px solid rgba(255,255,255,.3); border-top-color:#fff;
+  border-radius:50%; animation:spin .8s linear infinite; flex-shrink:0; }
+@keyframes spin { to { transform:rotate(360deg); } }
 
-.section-label {
-  font-size: 9px;
-  letter-spacing: 2px;
-  color: var(--txt-dim);
-  margin-bottom: 10px;
-  font-weight: 600;
-}
+/* Error */
+.error-bar { background:rgba(239,68,68,.1); border:1px solid rgba(239,68,68,.25); border-radius:var(--rs);
+  padding:11px 14px; color:#fca5a5; display:flex; align-items:center; gap:8px; margin-bottom:20px; }
 
-/* Route inputs */
-.route-inputs {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-.iata-field {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.iata-field label {
-  font-size: 9px;
-  letter-spacing: 1.5px;
-  color: var(--txt-dim);
-}
-.iata-field input {
-  background: var(--surface-2);
-  border: 1px solid var(--border-2);
-  color: var(--txt);
-  padding: 8px 10px;
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 2px;
-  border-radius: var(--radius);
-  text-transform: uppercase;
-  width: 100%;
-  outline: none;
-  transition: border-color 0.2s;
-}
-.iata-field input:focus { border-color: var(--acc); }
-.iata-field input.error { border-color: var(--neg); }
-.field-err { font-size: 9px; color: var(--neg); }
-.route-arrow { color: var(--txt-dim); font-size: 14px; padding-bottom: 10px; }
+/* Results */
+.results-grid { display:grid; grid-template-columns:400px 1fr; gap:18px; align-items:start; }
+@media (max-width:860px) { .results-grid { grid-template-columns:1fr; } }
+.col-left { display:flex; flex-direction:column; gap:14px; }
+.col-right { display:flex; flex-direction:column; gap:12px; }
 
-/* Date field */
-.date-field { display: flex; flex-direction: column; gap: 4px; }
-.date-label {
-  font-size: 9px;
-  letter-spacing: 1.5px;
-  color: var(--txt-dim);
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-.date-hint { font-size: 8.5px; color: var(--txt-faint); letter-spacing: 0.5px; text-transform: none; }
-.date-input {
-  background: var(--surface-2);
-  border: 1px solid var(--border-2);
-  color: var(--txt);
-  padding: 7px 10px;
-  font-size: 12px;
-  font-family: var(--mono);
-  letter-spacing: 0.5px;
-  border-radius: var(--radius);
-  width: 100%;
-  outline: none;
-  transition: border-color 0.2s;
-  color-scheme: dark;
-}
-.date-input:focus { border-color: var(--acc); }
+/* Flight card */
+.flight-card { background:var(--sf); border:1px solid var(--bd); border-radius:var(--r); overflow:hidden; }
+.fc-header { padding:12px 16px; border-bottom:1px solid var(--bd); display:flex; align-items:center; justify-content:space-between; }
+.route-pill { display:flex; align-items:center; gap:10px; }
+.rc { font-size:18px; font-weight:700; letter-spacing:1px; }
+.ra { color:var(--ink3); }
+.trip-badge { font-size:11px; padding:3px 10px; border-radius:20px; font-weight:500; }
+.badge-ow { background:rgba(79,142,247,.12); color:#93bbfc; border:1px solid rgba(79,142,247,.2); }
+.badge-rt { background:rgba(139,92,246,.12); color:#c4b5fd; border:1px solid rgba(139,92,246,.2); }
 
-/* Trigger grid */
-.trigger-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-}
-.trigger-btn {
-  background: var(--surface-2);
-  border: 1px solid var(--border-2);
-  color: var(--txt-dim);
-  padding: 8px 6px;
-  border-radius: var(--radius);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  font-size: 10px;
-  font-family: var(--mono);
-  letter-spacing: 0.5px;
-  transition: all 0.15s;
-  cursor: pointer;
-}
-.trigger-btn:hover { color: var(--txt); }
-.trigger-btn.active {
-  border-color: var(--acc);
-  color: var(--acc);
-  background: var(--acc-dim);
-}
-.trigger-icon { font-size: 15px; }
-.trigger-label { font-size: 9px; letter-spacing: 0.5px; text-align: center; }
+.fc-body { padding:18px 16px; display:flex; align-items:center; gap:14px; }
+.airline-col { display:flex; flex-direction:column; align-items:center; gap:5px; min-width:68px; }
+.logo-wrap { width:50px; height:50px; background:#fff; border-radius:9px; display:flex; align-items:center; justify-content:center; overflow:hidden; flex-shrink:0; }
+.airline-logo { width:42px; height:42px; object-fit:contain; }
+.logo-placeholder { width:100%; height:100%; background:var(--sf2); border-radius:9px; display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:700; color:var(--ac); }
+.airline-name { font-size:11px; color:var(--ink2); text-align:center; line-height:1.3; }
+.flt-no { font-size:11px; color:var(--ink3); }
 
-/* Analysis depth */
-.depth-section { padding-bottom: 14px; }
-.rounds-control { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.rounds-btn {
-  width: 26px; height: 26px;
-  background: var(--surface-2);
-  border: 1px solid var(--border-2);
-  color: var(--txt);
-  border-radius: var(--radius);
-  font-size: 14px;
-  display: flex; align-items: center; justify-content: center;
-  transition: border-color 0.15s;
-  cursor: pointer;
-}
-.rounds-btn:hover { border-color: var(--acc); color: var(--acc); }
-.rounds-val {
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--acc);
-  min-width: 24px;
-  text-align: center;
-}
-.depth-badge {
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-  padding: 2px 8px;
-  border-radius: 2px;
-  margin-left: 4px;
-}
-.depth-fast { color: var(--pos); background: rgba(0,230,118,0.12); border: 1px solid rgba(0,230,118,0.3); }
-.depth-std  { color: var(--acc); background: var(--acc-dim); border: 1px solid rgba(0,172,193,0.3); }
-.depth-deep { color: var(--warn); background: rgba(255,145,0,0.1); border: 1px solid rgba(255,145,0,0.3); }
-.depth-max  { color: var(--neg); background: rgba(255,59,48,0.1); border: 1px solid rgba(255,59,48,0.3); }
-.depth-desc { font-size: 10px; color: var(--txt-faint); line-height: 1.5; }
+.times-col { flex:1; display:flex; align-items:center; gap:6px; }
+.t-block { display:flex; flex-direction:column; gap:2px; min-width:68px; }
+.t-block.t-right { align-items:flex-end; }
+.t-time { font-size:22px; font-weight:700; letter-spacing:-.5px; font-variant-numeric:tabular-nums; }
+.nd { font-size:11px; color:var(--hold); font-weight:600; }
+.t-iata { font-size:12px; font-weight:600; color:var(--ac); }
+.t-apt { font-size:11px; color:var(--ink3); line-height:1.3; }
+.t-date { font-size:11px; color:var(--ink3); }
+.dur-col { flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; }
+.dur-line { display:block; height:1px; width:100%; background:var(--bdh); }
+.dur-text { font-size:11px; color:var(--ink3); }
+.stops-pill { font-size:11px; padding:2px 8px; border-radius:20px; }
+.stops-pill.direct { background:rgba(34,197,94,.12); color:#86efac; border:1px solid rgba(34,197,94,.2); }
+.stops-pill.stops { background:rgba(249,115,22,.12); color:#fdba74; border:1px solid rgba(249,115,22,.2); }
 
-/* Seed grid */
-.seed-grid { display: flex; flex-direction: column; gap: 6px; }
-.seed-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-}
-.seed-key { color: var(--txt-dim); min-width: 80px; font-size: 9px; letter-spacing: 1px; }
-.seed-val { color: var(--txt); flex: 1; font-weight: 600; }
-.seed-val.acc { color: var(--acc); }
-.seed-src { font-size: 9px; padding: 1px 5px; border-radius: 2px; color: var(--pos); border: 1px solid rgba(0,230,118,0.25); }
+.fare-col { display:flex; flex-direction:column; align-items:flex-end; gap:4px; min-width:86px; }
+.fare-lbl { font-size:11px; color:var(--ink3); }
+.fare-val { font-size:26px; font-weight:700; letter-spacing:-.5px; font-variant-numeric:tabular-nums; }
+.cabin-pill { font-size:11px; color:var(--ink3); background:var(--sf2); border:1px solid var(--bd); padding:2px 8px; border-radius:20px; }
 
-/* Action row */
-.action-row {
-  padding: 16px 20px 0;
-  display: flex;
-  gap: 8px;
-}
-.btn-primary {
-  flex: 1;
-  padding: 11px 0;
-  border-radius: var(--radius);
-  font-size: 11px;
-  font-family: var(--mono);
-  font-weight: 700;
-  letter-spacing: 1px;
-  border: 1px solid var(--acc);
-  background: var(--acc);
-  color: #000;
-  transition: all 0.15s;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.btn-primary:hover:not(:disabled) { background: #00cdd9; border-color: #00cdd9; }
-.btn-primary:disabled { opacity: 0.35; cursor: not-allowed; }
+/* Weather card */
+.weather-card { background:var(--sf); border:1px solid var(--bd); border-radius:var(--r); padding:16px; }
+.weather-card.risk-severe { border-color:rgba(239,68,68,.3); }
+.weather-card.risk-high { border-color:rgba(249,115,22,.3); }
+.weather-card.risk-moderate { border-color:rgba(245,158,11,.3); }
+.wc-title { font-size:11px; font-weight:600; color:var(--ink2); display:flex; align-items:center; gap:6px;
+  margin-bottom:14px; text-transform:uppercase; letter-spacing:.5px; }
+.risk-pill { margin-left:auto; font-size:11px; padding:2px 8px; border-radius:20px; font-weight:700; letter-spacing:.5px; }
+.rp-low { background:rgba(34,197,94,.12); color:#86efac; border:1px solid rgba(34,197,94,.2); }
+.rp-moderate { background:rgba(245,158,11,.12); color:#fcd34d; border:1px solid rgba(245,158,11,.2); }
+.rp-high { background:rgba(249,115,22,.12); color:#fdba74; border:1px solid rgba(249,115,22,.2); }
+.rp-severe { background:rgba(239,68,68,.12); color:#fca5a5; border:1px solid rgba(239,68,68,.2); }
 
-.llm-warning {
-  margin: 10px 20px 0;
-  font-size: 10px;
-  color: var(--warn);
-  border: 1px solid var(--warn-dim);
-  padding: 8px 10px;
-  border-radius: var(--radius);
-  line-height: 1.4;
-}
-.error-box {
-  margin: 10px 20px 0;
-  font-size: 11px;
-  color: var(--neg);
-  border: 1px solid rgba(255,59,48,0.3);
-  padding: 8px 10px;
-  border-radius: var(--radius);
-}
+.wx-pair { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
+.wx-airport { background:var(--sf2); border:1px solid var(--bd); border-radius:var(--rs); padding:10px;
+  display:flex; align-items:flex-start; gap:8px; }
+.wx-em { font-size:24px; flex-shrink:0; }
+.wx-info { flex:1; }
+.wx-cd { font-size:13px; font-weight:700; display:block; }
+.wx-ds { font-size:11px; color:var(--ink2); display:block; margin-bottom:5px; }
+.wx-stats { display:flex; flex-wrap:wrap; gap:5px; font-size:11px; color:var(--ink3); }
+.wx-ring { position:relative; flex-shrink:0; }
+.wx-sc { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:11px; font-weight:700; }
 
-/* ── Results panel ───────────────────────────────────────────── */
-.results {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
+.wx-summary { padding-top:12px; border-top:1px solid var(--bd); }
+.ot-row { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+.ot-lbl { font-size:12px; color:var(--ink2); white-space:nowrap; }
+.ot-bar { flex:1; height:5px; background:var(--sf2); border-radius:3px; overflow:hidden; }
+.ot-fill { height:100%; border-radius:3px; transition:width .6s ease; }
+.ot-pct { font-size:13px; font-weight:600; min-width:34px; text-align:right; }
+.wx-primary { font-size:12px; color:var(--ink2); margin:0 0 5px; }
+.wx-fc { font-size:11px; color:var(--ink3); }
 
-/* Empty state */
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  flex: 1;
-  text-align: center;
-  gap: 12px;
-  color: var(--txt-dim);
-  padding: 40px;
-}
-.empty-icon  { font-size: 40px; opacity: 0.2; }
-.empty-title { font-size: 14px; font-weight: 600; color: var(--txt); }
-.empty-desc  { font-size: 12px; max-width: 300px; line-height: 1.65; }
-.empty-desc strong { color: var(--acc); }
-.empty-routes { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 8px; }
-.sample-route {
-  font-size: 11px;
-  color: var(--acc);
-  border: 1px solid var(--acc-dim);
-  padding: 4px 10px;
-  border-radius: 2px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.sample-route:hover { background: var(--acc-dim); }
+/* Prediction card */
+.pred-card { background:var(--sf); border:1px solid var(--bd); border-radius:var(--r); overflow:hidden; }
+.pred-card.cs-strong_raise { border-color:rgba(239,68,68,.35); }
+.pred-card.cs-moderate_raise { border-color:rgba(249,115,22,.3); }
+.pred-card.cs-hold { border-color:rgba(245,158,11,.3); }
+.pred-card.cs-moderate_drop,.pred-card.cs-strong_drop { border-color:rgba(34,197,94,.3); }
+.pred-header { padding:11px 16px; border-bottom:1px solid var(--bd); display:flex; align-items:center;
+  justify-content:space-between; background:var(--sf2); }
+.pred-lbl { font-size:11px; font-weight:600; letter-spacing:.5px; text-transform:uppercase; color:var(--ink2); }
+.sim-id { font-size:11px; color:var(--ink3); font-family:monospace; }
+.pred-body { padding:18px 16px; display:flex; gap:18px; align-items:flex-start; }
+.pred-main { display:flex; flex-direction:column; gap:6px; min-width:140px; }
+.pred-sublbl { font-size:11px; color:var(--ink3); }
+.pred-val { font-size:34px; font-weight:700; letter-spacing:-1px; font-variant-numeric:tabular-nums; }
+.delta-badge { display:inline-flex; align-items:center; gap:4px; font-size:13px; font-weight:700;
+  padding:3px 10px; border-radius:20px; align-self:flex-start; }
+.du { background:rgba(239,68,68,.12); color:#fca5a5; border:1px solid rgba(239,68,68,.2); }
+.dd { background:rgba(34,197,94,.12); color:#86efac; border:1px solid rgba(34,197,94,.2); }
+.pred-meta { flex:1; display:flex; flex-direction:column; gap:9px; }
+.pm-row { display:flex; align-items:center; gap:10px; }
+.pm-lbl { font-size:11px; color:var(--ink3); width:90px; flex-shrink:0; }
+.pm-val { font-size:13px; font-weight:500; }
+.conf-bar { flex:1; height:4px; background:var(--sf2); border-radius:2px; overflow:hidden; }
+.conf-fill { height:100%; background:var(--ac); border-radius:2px; transition:width .6s ease; }
+.trigger-chip { font-size:11px; background:var(--acg); color:var(--ac); border:1px solid rgba(79,142,247,.2);
+  padding:2px 8px; border-radius:20px; text-transform:uppercase; letter-spacing:.5px; }
 
-/* Loading state */
-.loading-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  flex: 1;
-  gap: 14px;
-  color: var(--txt-dim);
-}
-.spinner {
-  width: 36px; height: 36px;
-  border: 2px solid var(--border-2);
-  border-top-color: var(--acc);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-.loading-label { font-size: 13px; font-weight: 600; color: var(--txt); letter-spacing: 0.5px; }
-.loading-sub   { font-size: 10px; color: var(--txt-dim); text-align: center; max-width: 280px; line-height: 1.5; }
-
-/* Result blocks */
-.result-block {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-}
-
-.block-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
-}
-.block-title { font-size: 9px; letter-spacing: 2px; font-weight: 700; color: var(--txt-dim); }
-.block-tag {
-  font-size: 9px;
-  padding: 2px 8px;
-  background: var(--surface-2);
-  border-radius: 2px;
-  color: var(--acc);
-  letter-spacing: 1px;
-}
-
-/* Fare card */
-.fare-card { padding: 0; }
-.fare-route { padding: 12px 16px 0; font-size: 12px; color: var(--txt-dim); letter-spacing: 1px; }
-.fare-row {
-  display: flex;
-  align-items: center;
-  padding: 12px 16px 16px;
-  gap: 16px;
-}
-.fare-col { display: flex; flex-direction: column; gap: 2px; }
-.fare-col.right { margin-left: auto; text-align: right; }
-.fare-lbl { font-size: 9px; letter-spacing: 1.5px; color: var(--txt-dim); }
-.fare-val { font-size: 28px; font-weight: 800; color: var(--txt); }
-.fare-val.pos { color: var(--pos); }
-.fare-val.neg { color: var(--neg); }
-.fare-arrow { font-size: 20px; color: var(--txt-dim); }
-.fare-arrow.pos { color: var(--pos); }
-.fare-arrow.neg { color: var(--neg); }
-.fare-delta { font-size: 24px; font-weight: 800; }
-.fare-delta.pos { color: var(--pos); }
-.fare-delta.neg { color: var(--neg); }
-.fare-consensus { font-size: 11px; color: var(--acc); text-transform: uppercase; letter-spacing: 1px; margin-top: 2px; }
-.fare-conf { font-size: 10px; color: var(--txt-dim); }
-
-/* CascadeChart padding */
-.result-block :deep(.cascade-chart) { padding: 12px 16px 8px; }
-.cascade-note { padding: 8px 16px 12px; font-size: 10px; color: var(--warn); }
-
-/* Timeline legend */
-.timeline-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding: 8px 16px;
-  border-bottom: 1px solid var(--border);
-}
-.leg { font-size: 9px; letter-spacing: 0.5px; color: var(--txt-faint); }
-.leg.raise { color: var(--pos); }
-.leg.drop  { color: var(--neg); }
-.leg.accel { color: var(--acc); }
-.leg.delay { color: var(--warn); }
-
-/* Agent timeline */
-.timeline { display: flex; flex-direction: column; }
-.timeline-row {
-  display: grid;
-  grid-template-columns: 26px 60px 54px 110px 46px 1fr;
-  gap: 6px;
-  align-items: center;
-  padding: 6px 16px;
-  border-bottom: 1px solid var(--border);
-  font-size: 10px;
-}
-.timeline-row:last-child { border-bottom: none; }
-.timeline-row.dec-raise  { border-left: 2px solid var(--pos); }
-.timeline-row.dec-drop   { border-left: 2px solid var(--neg); }
-.timeline-row.dec-delay  { border-left: 2px solid var(--warn); }
-.timeline-row.dec-shift  { border-left: 2px solid var(--warn); }
-.timeline-row.dec-accel  { border-left: 2px solid var(--acc); }
-.timeline-row.dec-hold   { border-left: 2px solid var(--border-2); }
-
-.tl-round  { color: var(--txt-dim); font-size: 9px; }
-.tl-agent  { color: var(--txt); font-weight: 600; }
-.tl-role   { color: var(--txt-dim); font-size: 9px; letter-spacing: 0.5px; }
-.tl-decision { color: var(--txt); }
-.tl-mag    { font-weight: 700; font-size: 11px; }
-.tl-mag.pos { color: var(--pos); }
-.tl-mag.neg { color: var(--neg); }
-.tl-reason { color: var(--txt-dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Agents */
+.agents-card,.narrative-card,.cascade-card { background:var(--sf); border:1px solid var(--bd); border-radius:var(--r); padding:16px; }
+.card-title { font-size:11px; font-weight:600; color:var(--ink2); text-transform:uppercase; letter-spacing:.5px;
+  display:flex; align-items:center; gap:6px; margin-bottom:12px; }
+.agents-list { display:flex; flex-direction:column; gap:9px; }
+.agent-row { display:flex; gap:10px; align-items:flex-start; }
+.agent-av { width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  font-size:12px; font-weight:700; color:#fff; flex-shrink:0; margin-top:2px; }
+.agent-body { flex:1; }
+.agent-hdr { display:flex; align-items:center; gap:7px; flex-wrap:wrap; margin-bottom:3px; }
+.a-name { font-size:13px; font-weight:600; }
+.a-round { font-size:11px; color:var(--ink3); background:var(--sf2); padding:1px 5px; border-radius:4px; }
+.dec-chip { font-size:11px; padding:2px 7px; border-radius:20px; text-transform:capitalize; }
+.dc-raise_fares { background:rgba(239,68,68,.12); color:#fca5a5; border:1px solid rgba(239,68,68,.2); }
+.dc-hold_fares { background:rgba(245,158,11,.12); color:#fcd34d; border:1px solid rgba(245,158,11,.2); }
+.dc-drop_fares { background:rgba(34,197,94,.12); color:#86efac; border:1px solid rgba(34,197,94,.2); }
+.dc-delay_booking { background:rgba(139,92,246,.12); color:#c4b5fd; border:1px solid rgba(139,92,246,.2); }
+.dc-accelerate_booking { background:rgba(14,165,233,.12); color:#7dd3fc; border:1px solid rgba(14,165,233,.2); }
+.dc-shift_carrier { background:rgba(107,114,128,.12); color:#d1d5db; border:1px solid rgba(107,114,128,.2); }
+.a-mag { font-size:12px; font-weight:700; margin-left:auto; }
+.a-mag.pos { color:#fca5a5; } .a-mag.neg { color:#86efac; }
+.a-reason { font-size:12px; color:var(--ink2); line-height:1.5; margin:0; }
+.show-more { margin-top:10px; background:transparent; border:1px solid var(--bd); color:var(--ink2);
+  font-size:12px; font-family:inherit; padding:6px 12px; border-radius:var(--rs); cursor:pointer;
+  width:100%; transition:all .15s; }
+.show-more:hover { border-color:var(--ac); color:var(--ac); }
 
 /* Narrative */
-.narrative {
-  padding: 16px;
-  line-height: 1.7;
-  font-size: 12px;
-  color: var(--txt-dim);
-}
-.narrative :deep(h3) {
-  font-size: 11px;
-  letter-spacing: 1.5px;
-  color: var(--acc);
-  margin: 14px 0 6px;
-  font-weight: 700;
-}
-.narrative :deep(p) { margin-bottom: 8px; }
-.narrative :deep(strong) { color: var(--txt); font-weight: 600; }
+.narrative { font-size:13px; color:var(--ink2); line-height:1.7; margin:0; }
+
+/* Cascade */
+.cascade-list { display:flex; flex-direction:column; gap:7px; }
+.cascade-row { display:flex; align-items:center; gap:9px; }
+.c-node { font-size:12px; color:var(--ink2); width:130px; flex-shrink:0; text-transform:capitalize; }
+.c-bar-wrap { flex:1; height:4px; background:var(--sf2); border-radius:2px; overflow:hidden; }
+.c-bar-fill { height:100%; border-radius:2px; transition:width .6s ease; }
+.c-val { font-size:12px; font-weight:600; width:36px; text-align:right; }
+.c-val.pos { color:#fca5a5; } .c-val.neg { color:#86efac; }
+.c-days { font-size:11px; color:var(--ink3); width:32px; }
 
 /* Sources */
-.sources-block { padding: 12px 16px; }
-.sources-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.source-chip {
-  font-size: 9px;
-  padding: 2px 8px;
-  border-radius: 2px;
-  letter-spacing: 0.5px;
-}
-.source-chip.serpapi, .source-chip.live, .source-chip.opensky {
-  color: var(--pos);
-  border: 1px solid rgba(0, 230, 118, 0.25);
-}
-.source-chip.synthetic, .source-chip.partial {
-  color: var(--txt-dim);
-  border: 1px solid var(--border-2);
+.sources-row { display:flex; gap:6px; flex-wrap:wrap; }
+.src-chip { font-size:11px; padding:3px 9px; border-radius:20px; }
+.cl { background:rgba(34,197,94,.1); color:#86efac; border:1px solid rgba(34,197,94,.2); }
+.cs { background:rgba(107,114,128,.1); color:#d1d5db; border:1px solid rgba(107,114,128,.2); }
+
+/* Empty */
+.empty-state { text-align:center; padding:70px 20px; }
+.empty-icon { font-size:38px; color:var(--ac); margin-bottom:18px; }
+.empty-h { font-size:22px; font-weight:700; margin:0 0 10px; letter-spacing:-.4px; }
+.empty-p { color:var(--ink2); max-width:440px; margin:0 auto 24px; line-height:1.6; }
+.example-row { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; }
+.example-chip { padding:8px 16px; background:var(--sf); border:1px solid var(--bd); border-radius:20px;
+  color:var(--ink2); font-size:13px; font-family:inherit; cursor:pointer; transition:all .15s; }
+.example-chip:hover { border-color:var(--ac); color:var(--ac); background:var(--acg); }
+
+/* Transitions */
+.fade-up-enter-active { transition:opacity .4s ease, transform .4s ease; }
+.fade-up-enter-from { opacity:0; transform:translateY(14px); }
+@media (prefers-reduced-motion:reduce) {
+  .fade-up-enter-active { transition:opacity .2s; }
+  .fade-up-enter-from { transform:none; }
 }
 
-/* Responsive */
-@media (max-width: 700px) {
-  .controls { width: 100%; min-width: unset; }
-  .body { flex-direction: column; }
-  .macro-ticker { display: none; }
-  .results { padding: 12px; }
-  .timeline-row { grid-template-columns: 26px 56px 48px 1fr; }
-  .tl-mag, .tl-reason { display: none; }
-}
+input[type="date"]::-webkit-calendar-picker-indicator { filter:invert(0.6); cursor:pointer; }
 </style>
