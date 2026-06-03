@@ -5,10 +5,14 @@ LLM客户端封装
 
 import json
 import re
+import time
 from typing import Optional, Dict, Any, List
 from openai import OpenAI
 
 from ..config import Config
+
+import logging
+_log = logging.getLogger("airwave.llm")
 
 
 class LLMClient:
@@ -37,7 +41,8 @@ class LLMClient:
         messages: List[Dict[str, str]],
         temperature: float = 0.7,
         max_tokens: int = 4096,
-        response_format: Optional[Dict] = None
+        response_format: Optional[Dict] = None,
+        extra_body: Optional[Dict] = None,
     ) -> str:
         """
         发送聊天请求
@@ -61,7 +66,26 @@ class LLMClient:
         if response_format:
             kwargs["response_format"] = response_format
 
-        response = self.client.chat.completions.create(**kwargs)
+        if extra_body:
+            kwargs["extra_body"] = extra_body
+
+        # Retry on rate-limit (429) with exponential back-off
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            try:
+                response = self.client.chat.completions.create(**kwargs)
+                break
+            except Exception as exc:
+                err_str = str(exc).lower()
+                if any(k in err_str for k in ("429", "rate limit", "quota", "resource_exhausted")):
+                    wait = 8 * (2 ** attempt)   # 8s → 16s → 32s
+                    _log.warning(f"Rate limited (attempt {attempt+1}/3) — waiting {wait}s: {exc}")
+                    time.sleep(wait)
+                    last_exc = exc
+                    continue
+                raise
+        else:
+            raise RuntimeError(f"LLM call failed after 3 retries: {last_exc}")
         msg = response.choices[0].message
         content = msg.content
 
@@ -98,16 +122,18 @@ class LLMClient:
         self,
         messages: List[Dict[str, str]],
         temperature: float = 0.3,
-        max_tokens: int = 4096
+        max_tokens: int = 4096,
+        extra_body: Optional[Dict] = None,
     ) -> Dict[str, Any]:
         """
         发送聊天请求并返回JSON
-        
+
         Args:
             messages: 消息列表
             temperature: 温度参数
             max_tokens: 最大token数
-            
+            extra_body: Extra parameters forwarded to the API (e.g. thinking_config)
+
         Returns:
             解析后的JSON对象
         """
@@ -115,7 +141,8 @@ class LLMClient:
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
+            extra_body=extra_body,
         )
         # Try to parse JSON from the response, handling common model quirks:
         # 1. Response wrapped in ```json ... ``` code block
@@ -144,6 +171,23 @@ class LLMClient:
                 return json.loads(brace_match.group(0))
             except json.JSONDecodeError:
                 pass
+
+        # Partial-JSON recovery: model hit token limit mid-object.
+        # Try to salvage whatever key:value pairs are present before truncation.
+        partial = re.search(r'\{([\s\S]+)', cleaned)
+        if partial:
+            fragment = partial.group(1)
+            # Extract individual "key": value pairs via regex
+            recovered: dict = {}
+            for m in re.finditer(r'"(\w+)"\s*:\s*("(?:[^"\\]|\\.)*"|[-\d.]+|true|false|null)', fragment):
+                key, raw = m.group(1), m.group(2)
+                try:
+                    recovered[key] = json.loads(raw)
+                except Exception:
+                    pass
+            if recovered:
+                _log.warning(f"chat_json: partial JSON recovered ({list(recovered.keys())}); original was truncated")
+                return recovered
 
         raise ValueError(f"LLM返回的JSON格式无效: {cleaned}")
 

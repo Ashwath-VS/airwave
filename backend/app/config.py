@@ -47,6 +47,8 @@ class Config:
     # AirWave data pipeline keys
     SERPAPI_KEY = os.environ.get('SERPAPI_KEY')
     TRAVELPAYOUTS_KEY = os.environ.get('TRAVELPAYOUTS_KEY')
+    DUFFEL_API_KEY = os.environ.get('DUFFEL_API_KEY')       # duffel_live_... token
+    KIWI_API_KEY = os.environ.get('KIWI_API_KEY')           # tequila.kiwi.com API key
 
     # AirWave simulation config
     SIMULATION_DATA_DIR = os.path.join(os.path.dirname(__file__), '../uploads/simulations')
@@ -63,11 +65,25 @@ class Config:
     
     @classmethod
     def validate(cls) -> list[str]:
-        """验证必要配置"""
+        """Validate required configuration. Only LLM_API_KEY is hard-required for AirWave.
+        ZEP_API_KEY is optional — only needed for OASIS social simulation."""
         errors: list[str] = []
         if not cls.LLM_API_KEY:
-            errors.append("LLM_API_KEY 未配置")
-        if not cls.ZEP_API_KEY:
-            errors.append("ZEP_API_KEY 未配置")
+            errors.append("LLM_API_KEY not configured — add your Gemini/OpenAI key to .env")
+        # ZEP is optional for AirWave; log a warning instead of blocking startup
+        if not cls.ZEP_API_KEY or cls.ZEP_API_KEY.startswith("FILL_IN"):
+            import logging
+            logging.getLogger("mirofish").warning(
+                "ZEP_API_KEY not set — OASIS social simulation features will be unavailable. "
+                "AirWave fare simulation is unaffected."
+            )
+        # Warn (don't block) if still on Duffel test token
+        if cls.DUFFEL_API_KEY and cls.DUFFEL_API_KEY.startswith("duffel_test_"):
+            import logging
+            logging.getLogger("mirofish").warning(
+                "DUFFEL_API_KEY is a test token (duffel_test_...). "
+                "Test tokens are sandbox-only and will be revoked. "
+                "Replace with a live token from app.duffel.com for production."
+            )
         return errors
 

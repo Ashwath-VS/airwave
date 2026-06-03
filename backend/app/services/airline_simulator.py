@@ -14,6 +14,8 @@ and a confidence interval from the agent narrative outputs.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import json
 import re
 from dataclasses import dataclass, field
@@ -95,6 +97,79 @@ AIRLINE_AGENTS: list[Agent] = [
         hedge_ratio=0.0,
         market_share=0.0,
     ),
+    Agent(
+        id="ulcc_rm",
+        name="Yara Okonkwo",
+        role="Revenue Manager, Ultra-Low Cost Carrier",
+        personality=(
+            "Hyper-aggressive yield manager at a ULCC. Zero fuel hedging whatsoever. "
+            "Primary revenue lever is ancillary: seat selection, bags, priority boarding. "
+            "Will slash base fares to near-zero to capture volume and outflank LCCs, "
+            "then recover margin through unbundled extras. "
+            "Reacts to any demand signal within 24 hours — faster than any other carrier."
+        ),
+        constraints=(
+            "No checked bags included. All ancillaries strictly unbundled. "
+            "Primary distribution: own website, no GDS. Operates thin margins on every route."
+        ),
+        hedge_ratio=0.0,
+        market_share=0.12,
+    ),
+    Agent(
+        id="premium_boutique",
+        name="Elena Vasquez",
+        role="Network Pricing Director, Premium Boutique Airline",
+        personality=(
+            "Curates a premium niche product with loyal high-yield clientele. "
+            "Never competes on price — protects fare integrity and brand positioning above all. "
+            "Will hold fares stable or add product value (lounge access, flexibility waivers) "
+            "rather than discount even under significant fare pressure from competitors. "
+            "Corporate accounts are locked in; leisure demand is secondary."
+        ),
+        constraints=(
+            "Limited fleet, premium routes only. 90% fuel hedged for 180 days. "
+            "Corporate accounts carry fixed-rate agreements that cannot be adjusted mid-quarter."
+        ),
+        hedge_ratio=0.90,
+        market_share=0.07,
+    ),
+    Agent(
+        id="ota_platform",
+        name="Nikos Papadopoulos",
+        role="Chief Merchandising Officer, Online Travel Agency",
+        personality=(
+            "Aggregates inventory across 40+ airlines. Optimises for conversion rate and "
+            "GDS commission per booking. When fares spike, re-ranks cheaper alternatives "
+            "and fires price-drop alerts to 50M+ registered users, amplifying demand shifts. "
+            "Actively merchandises 'deal' fares from capacity-dumping carriers. "
+            "No airline loyalty — pure margin maximisation per search click."
+        ),
+        constraints=(
+            "Must display best available published fare. No exclusive inventory access. "
+            "GDS-dependent; NDC integrations partial. Must comply with screen-scraping T&Cs."
+        ),
+        hedge_ratio=0.0,
+        market_share=0.0,
+    ),
+    Agent(
+        id="miles_optimizer",
+        name="Tariq Al-Hassan",
+        role="Frequent Flyer / Points & Miles Optimizer",
+        personality=(
+            "Exclusively books premium cabins using miles and credit-card points. "
+            "Tracks award-space openings obsessively across multiple loyalty programs. "
+            "A cash-fare spike above 10% immediately triggers a points redemption search — "
+            "pulling demand from the revenue booking pool into award inventory. "
+            "Shares award findings with a 200K-follower community, creating demand ripples."
+        ),
+        constraints=(
+            "Points + miles budget: ~500K points annually. "
+            "Prefers nonstop routes for award availability. "
+            "Booking window: 30–45 days out for premium cabin saver awards."
+        ),
+        hedge_ratio=0.0,
+        market_share=0.0,
+    ),
 ]
 
 
@@ -149,22 +224,26 @@ class AirlineSimulator:
         seed: LiveSeed,
         simulation_id: str,
         rounds: int | None = None,
+        trigger_ids: list[str] | None = None,
+        news_context: list[str] | None = None,
     ) -> SimulationResult:
         """
         Run the full simulation and return a prediction result.
+        trigger_ids: if provided, cascade runs on all of them (combined shock).
         """
         n_rounds = rounds or self.rounds
+        effective_triggers = trigger_ids or [seed.trigger_id]
         logger.info(
             f"Starting simulation: id={simulation_id}, "
-            f"route={seed.route_label}, trigger={seed.trigger_id}, rounds={n_rounds}"
+            f"route={seed.route_label}, triggers={effective_triggers}, rounds={n_rounds}"
         )
 
-        # Step 1: cascade model outputs
-        cascade = run_cascade(seed.trigger_id)
+        # Step 1: cascade model outputs (multi-trigger if provided)
+        cascade = run_cascade(effective_triggers)
         logger.info(f"Cascade computed: {len(cascade)} nodes affected")
 
         # Step 2: build simulation context
-        context = self._build_context(seed, cascade)
+        context = self._build_context(seed, cascade, news_context or [])
 
         # Step 3: run agent rounds
         actions: list[AgentAction] = []
@@ -174,22 +253,55 @@ class AirlineSimulator:
             "lcc_last_move": 0.0,
             "legacy_last_move": 0.0,
         }
+        # Build an index for ordering agent results deterministically
+        _agent_order = {a.id: i for i, a in enumerate(AIRLINE_AGENTS)}
+
+        llm_failures = 0
+        total_calls = n_rounds * len(AIRLINE_AGENTS)
 
         for round_num in range(1, n_rounds + 1):
-            logger.debug(f"Round {round_num}/{n_rounds}")
-            for agent in AIRLINE_AGENTS:
-                action = self._agent_turn(agent, round_num, context, market_state, actions)
+            logger.info(f"Round {round_num}/{n_rounds} — running {len(AIRLINE_AGENTS)} agents in parallel")
+            # Snapshot state before the round so all agents see the same context
+            snapshot_actions = list(actions)
+            snapshot_market = dict(market_state)
+            round_results: list[AgentAction] = []
+
+            with ThreadPoolExecutor(max_workers=len(AIRLINE_AGENTS)) as executor:
+                futures = {
+                    executor.submit(
+                        self._agent_turn, agent, round_num, context,
+                        snapshot_market, snapshot_actions
+                    ): agent
+                    for agent in AIRLINE_AGENTS
+                }
+                for future in as_completed(futures):
+                    action = future.result()
+                    if "LLM unavailable" in action.reasoning or "Error — defaulting" in action.reasoning:
+                        llm_failures += 1
+                    round_results.append(action)
+
+            # Sort results in canonical agent order for deterministic output
+            round_results.sort(key=lambda a: _agent_order.get(a.agent_id, 99))
+
+            # Apply round results to market state
+            for action in round_results:
                 actions.append(action)
-                # Update market state after each agent acts
-                if agent.id == "lcc_rm":
+                if action.agent_id == "lcc_rm":
                     market_state["lcc_last_move"] = action.magnitude
-                elif agent.id == "legacy_rm":
+                elif action.agent_id == "legacy_rm":
                     market_state["legacy_last_move"] = action.magnitude
-                if action.decision in ("raise_fares", "drop_fares"):
-                    # Market price drifts toward agent moves, weighted by market share
-                    market_state["current_price"] *= (
-                        1 + action.magnitude * agent.market_share
-                    )
+                ag = next((a for a in AIRLINE_AGENTS if a.id == action.agent_id), None)
+                if ag and action.decision in ("raise_fares", "drop_fares"):
+                    market_state["current_price"] *= (1 + action.magnitude * ag.market_share)
+
+        # If more than half the agents couldn't call the LLM, the simulation is
+        # unreliable — surface a hard error rather than returning fictitious results
+        if llm_failures > total_calls * 0.5:
+            raise RuntimeError(
+                f"Agent simulation failed: {llm_failures}/{total_calls} LLM calls returned errors. "
+                "Possible causes: API rate limit exceeded, invalid API key, or network issue. "
+                "Check your LLM_API_KEY in .env and try again in 30 seconds."
+            )
 
         # Step 4: extract quantitative prediction
         fare_delta, confidence, days = self._extract_prediction(actions, cascade)
@@ -229,7 +341,7 @@ class AirlineSimulator:
 
     # ── Private helpers ────────────────────────────────────────────────────────
 
-    def _build_context(self, seed: LiveSeed, cascade: dict[str, NodeImpact]) -> str:
+    def _build_context(self, seed: LiveSeed, cascade: dict[str, NodeImpact], news_context: list[str] | None = None) -> str:
         top_impacts = sorted(
             cascade.values(), key=lambda x: abs(x.impact), reverse=True
         )[:5]
@@ -254,6 +366,11 @@ class AirlineSimulator:
                 f"  Primary risk: {d.primary_risk_factor}"
             )
 
+        news_block = ""
+        if news_context:
+            news_lines = "\n".join(f"  - {item}" for item in news_context[:10])
+            news_block = f"\n\nBREAKING NEWS CONTEXT (selected by analyst):\n{news_lines}"
+
         return f"""ROUTE: {seed.route_label}
 MACRO SHOCK: {seed.trigger_id}
 CURRENT FARE: ${seed.fare.current_price_usd:.0f} (source: {seed.fare.source})
@@ -262,7 +379,7 @@ DEMAND INDEX: {seed.demand.demand_index:.2f} ({seed.demand.flights_last_24h} fli
 MACRO: VIX={seed.macro.vix}, WTI=${seed.macro.wti_price:.0f}, USD/EUR={seed.macro.usd_eur}
 
 P&L CASCADE TOP IMPACTS:
-{impact_lines}{weather_block}"""
+{impact_lines}{weather_block}{news_block}"""
 
     def _agent_turn(
         self,
@@ -274,10 +391,10 @@ P&L CASCADE TOP IMPACTS:
     ) -> AgentAction:
         """Ask the LLM to play one agent's turn."""
 
-        # Summarise recent actions from other agents (last 2 rounds)
+        # Summarise actions from the most recent completed round (round-based window)
         recent = [
-            a for a in previous_actions[-8:]
-            if a.agent_id != agent.id
+            a for a in previous_actions
+            if a.agent_id != agent.id and a.round_num >= round_num - 1
         ]
         recent_summary = "\n".join(
             f"  - {a.agent_name} ({a.agent_id}): {a.decision} "
@@ -300,18 +417,20 @@ Legacy last move: {market_state['legacy_last_move']*100:+.0f}%
 OTHER AGENTS' RECENT MOVES:
 {recent_summary}
 
-You MUST respond with valid JSON and nothing else. Example:
-{{"decision": "raise_fares", "magnitude": 0.12, "reasoning": "Fuel spike increases CASK 20%, passing 70% to fares.", "confidence": 0.85}}
+Respond with ONLY a JSON object. No prose, no markdown, no explanation outside the JSON.
+{{"decision": "raise_fares", "magnitude": 0.12, "reasoning": "One sentence, max 120 chars.", "confidence": 0.85}}
 
-Valid decisions: raise_fares, hold_fares, drop_fares, delay_booking, accelerate_booking, shift_carrier
-magnitude must be a number between -0.30 and 0.30 (fraction of price)
-confidence must be a number between 0.0 and 1.0"""
+Rules:
+- decision: one of raise_fares | hold_fares | drop_fares | delay_booking | accelerate_booking | shift_carrier
+- magnitude: float -0.30 to 0.30
+- reasoning: ONE sentence, strictly under 120 characters
+- confidence: float 0.0 to 1.0"""
 
         try:
             response = self.llm.chat_json(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=Config.SIMULATION_TEMPERATURE,
-                max_tokens=4096,  # Gemini 2.5 Flash counts thinking tokens against budget
+                max_tokens=8192,
             )
             decision = str(response.get("decision", "hold_fares"))
             magnitude = float(response.get("magnitude", 0.0))
@@ -410,33 +529,63 @@ confidence must be a number between 0.0 and 1.0"""
             for n in top_nodes
         )
 
-        prompt = f"""You are an airline revenue intelligence analyst. Write a 4-section prediction brief.
+        # Pull extra context for richer, route-specific analysis
+        airline  = seed.fare.airline_name or "unknown carrier"
+        macro_ctx = (
+            f"VIX {seed.macro.vix:.1f} ({'elevated' if seed.macro.vix > 25 else 'normal'}), "
+            f"WTI ${seed.macro.wti_price:.0f}/bbl, "
+            f"USD/EUR {seed.macro.usd_eur:.3f}"
+        )
+        wx_ctx = ""
+        if seed.disruption:
+            wx_ctx = (
+                f"Origin weather: {seed.disruption.origin_weather.weather_desc} "
+                f"(disruption score {seed.disruption.origin_weather.disruption_score}/100). "
+                f"Dest weather: {seed.disruption.dest_weather.weather_desc} "
+                f"(disruption score {seed.disruption.dest_weather.disruption_score}/100). "
+                f"On-time probability: {seed.disruption.on_time_probability*100:.0f}%."
+            )
+        demand_ctx = (
+            f"Demand index {seed.demand.demand_index:.2f} "
+            f"({seed.demand.flights_last_24h} flights in last 24h on this route)"
+        )
+        history_ctx = (
+            f"Historical baseline ${seed.history.baseline_price_usd:.0f}, "
+            f"trend {seed.history.price_trend*100:+.1f}% vs monthly avg"
+        )
+
+        prompt = f"""You are a senior airline revenue intelligence analyst writing a confidential fare outlook brief for a corporate travel manager.
 
 ROUTE: {seed.route_label}
-SHOCK: {seed.trigger_id}
-SEED FARE: ${seed.fare.current_price_usd:.0f}
-PREDICTED FARE DELTA: {'+' if fare_delta >= 0 else ''}{fare_delta*100:.1f}%
-CONFIDENCE: {confidence*100:.0f}%
+SHOCK EVENT: {seed.trigger_id}
+CURRENT FARE: ${seed.fare.current_price_usd:.0f} ({airline}, source: {seed.fare.source})
+PREDICTED DELTA: {fare_delta*100:+.1f}% → implied ${seed.fare.current_price_usd * (1 + fare_delta):.0f}
+MODEL CONFIDENCE: {confidence*100:.0f}%
+MACRO: {macro_ctx}
+DEMAND: {demand_ctx}
+HISTORY: {history_ctx}
+{f"WEATHER/OPS: {wx_ctx}" if wx_ctx else ""}
 
-AGENT FINAL POSITIONS:
+AGENT FINAL POSITIONS (last simulation round):
 {agent_summary}
 
-CASCADE MODEL OUTPUTS:
+TOP CASCADE IMPACTS:
 {cascade_lines}
 
-Write exactly 4 sections with these headers. Keep each section to 2–3 sentences.
-Under 400 words total. No jargon walls. Plain English.
+Write a sharp 4-section analysis. Use the actual numbers above — do not be vague about prices or percentages.
+Each section is 2–3 sentences of substance. No filler, no repetition of headings in body text.
+Vary sentence structure. Write like an analyst, not a template.
 
 ## What Happened
 ## How Airlines Will Respond
 ## What This Means for Fares
-## Watch List (3 signals)"""
+## Watch List"""
 
         try:
             narrative = self.llm.chat(
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.4,
-                max_tokens=800,
+                temperature=0.7,
+                max_tokens=8192,
             )
         except Exception as e:
             logger.warning(f"Report generation failed: {e}")

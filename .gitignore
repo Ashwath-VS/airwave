@@ -10,6 +10,9 @@ Thumbs.db
 .env.test
 .env.production
 
+# Frontend build output
+frontend/dist/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -48,6 +51,9 @@ htmlcov/
 # 文档与测试程序
 mydoc/
 mytest/
+
+# Ad-hoc local test scripts (not part of the test suite)
+backend/test_*.py
 
 # 日志文件
 backend/logs/

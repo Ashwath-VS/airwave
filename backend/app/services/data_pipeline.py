@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import httpx
@@ -41,6 +42,133 @@ ICAO_TO_IATA: dict[str, str] = {
 }
 
 IATA_TO_ICAO: dict[str, str] = {v: k for k, v in ICAO_TO_IATA.items()}
+
+
+# ── Google Flights locale map ─────────────────────────────────────────────────
+# Maps origin IATA → Google country code (gl=) so tax-inclusive fares are shown
+# correctly (e.g. UK APD, EU taxes). Keeps hl=en so responses stay in English.
+# Unmapped airports default to "us" (base-fare, no local tax surcharge).
+AIRPORT_GL: dict[str, str] = {
+    # United Kingdom
+    "LHR": "gb", "LGW": "gb", "STN": "gb", "LTN": "gb",
+    "MAN": "gb", "BHX": "gb", "EDI": "gb", "GLA": "gb",
+    "LPL": "gb", "NCL": "gb", "BRS": "gb", "LBA": "gb",
+    # Ireland
+    "DUB": "ie", "SNN": "ie", "ORK": "ie",
+    # Germany
+    "FRA": "de", "MUC": "de", "BER": "de", "HAM": "de",
+    "DUS": "de", "CGN": "de", "STR": "de", "NUE": "de",
+    # France
+    "CDG": "fr", "ORY": "fr", "LYS": "fr", "MRS": "fr",
+    "NCE": "fr", "BOD": "fr", "TLS": "fr",
+    # Netherlands
+    "AMS": "nl", "RTM": "nl", "EIN": "nl",
+    # Belgium
+    "BRU": "be", "CRL": "be", "ANR": "be",
+    # Switzerland
+    "ZRH": "ch", "GVA": "ch", "BSL": "ch",
+    # Austria
+    "VIE": "at", "SZG": "at", "INN": "at",
+    # Italy
+    "FCO": "it", "MXP": "it", "LIN": "it", "NAP": "it",
+    "VCE": "it", "BGY": "it", "PMO": "it",
+    # Spain
+    "MAD": "es", "BCN": "es", "AGP": "es", "PMI": "es",
+    "VLC": "es", "SVQ": "es", "IBZ": "es",
+    # Portugal
+    "LIS": "pt", "OPO": "pt", "FAO": "pt",
+    # Greece
+    "ATH": "gr", "HER": "gr", "SKG": "gr", "CFU": "gr",
+    # Scandinavia
+    "OSL": "no", "BGO": "no",
+    "ARN": "se", "GOT": "se",
+    "CPH": "dk", "BLL": "dk",
+    "HEL": "fi",
+    # Eastern Europe
+    "WAW": "pl", "KRK": "pl",
+    "PRG": "cz",
+    "BUD": "hu",
+    "OTP": "ro",
+    "SOF": "bg",
+    "VIE": "at",
+    # Middle East
+    "DXB": "ae", "AUH": "ae", "SHJ": "ae",
+    "DOH": "qa", "KWI": "kw", "BAH": "bh", "AHB": "sa",
+    "RUH": "sa", "JED": "sa", "TLV": "il", "AMM": "jo",
+    # Asia Pacific
+    "HKG": "hk",
+    "SIN": "sg",
+    "BKK": "th", "HKT": "th", "CNX": "th",
+    "KUL": "my", "PEN": "my",
+    "CGK": "id", "DPS": "id",
+    "MNL": "ph", "CEB": "ph",
+    "SGN": "vn", "HAN": "vn",
+    "HND": "jp", "NRT": "jp", "KIX": "jp", "FUK": "jp",
+    "ICN": "kr", "GMP": "kr",
+    "PEK": "cn", "PVG": "cn", "CAN": "cn", "CTU": "cn",
+    "BOM": "in", "DEL": "in", "MAA": "in", "BLR": "in",
+    "HYD": "in", "CCU": "in", "COK": "in",
+    "CMB": "lk",
+    "KTM": "np",
+    "DAC": "bd",
+    "KHI": "pk", "LHE": "pk", "ISB": "pk",
+    "SYD": "au", "MEL": "au", "BNE": "au", "PER": "au",
+    "ADL": "au", "CBR": "au",
+    "AKL": "nz", "CHC": "nz",
+    # Canada
+    "YYZ": "ca", "YVR": "ca", "YUL": "ca", "YYC": "ca",
+    "YEG": "ca", "YOW": "ca", "YHZ": "ca",
+    # Latin America
+    "EZE": "ar", "AEP": "ar",
+    "GRU": "br", "GIG": "br", "BSB": "br", "SSA": "br",
+    "BOG": "co", "MDE": "co",
+    "SCL": "cl",
+    "LIM": "pe",
+    "UIO": "ec", "GYE": "ec",
+    "MVD": "uy",
+    "CCS": "ve",
+    "MEX": "mx", "CUN": "mx", "GDL": "mx",
+    "PTY": "pa",
+    "SJO": "cr",
+    "SAL": "sv",
+    "GUA": "gt",
+    "SDQ": "do", "PUJ": "do",
+    "HAV": "cu",
+    # Africa
+    "JNB": "za", "CPT": "za", "DUR": "za",
+    "NBO": "ke", "MBA": "ke",
+    "DAR": "tz", "ZNZ": "tz",
+    "ADD": "et",
+    "ACC": "gh",
+    "LOS": "ng", "ABV": "ng",
+    "CMN": "ma", "RAK": "ma",
+    "TUN": "tn",
+    "ALG": "dz",
+    "CAI": "eg", "SSH": "eg", "HRG": "eg",
+    "CPT": "za",
+    # US — all default to "us" but list key hubs explicitly
+    "JFK": "us", "LAX": "us", "ORD": "us", "ATL": "us",
+    "DFW": "us", "SFO": "us", "BOS": "us", "MIA": "us",
+    "EWR": "us", "SEA": "us", "IAD": "us", "DCA": "us",
+    "LAS": "us", "DEN": "us", "PHX": "us", "CLT": "us",
+    "MSP": "us", "DTW": "us", "PHL": "us", "SLC": "us",
+    "BWI": "us", "MDW": "us", "HOU": "us", "FLL": "us",
+    "SAN": "us", "TPA": "us", "PDX": "us", "HNL": "us",
+    "AUS": "us", "BNA": "us", "STL": "us", "MCI": "us",
+    "RDU": "us", "CLE": "us", "IND": "us", "CMH": "us",
+    "PIT": "us", "MEM": "us", "MKE": "us", "OMA": "us",
+}
+
+
+def _airport_gl(iata: str) -> str:
+    """Return the Google country code (gl=) for a given origin IATA code.
+
+    Drives tax-inclusive fare display: UK searches include APD, EU searches
+    include local aviation taxes, matching what Skyscanner/Expedia show users
+    in those countries. Falls back to 'us' (base fare, no surcharges) for
+    unmapped airports.
+    """
+    return AIRPORT_GL.get(iata.upper(), "us")
 
 
 def iata_to_icao(iata: str) -> str:
@@ -169,6 +297,7 @@ class LiveSeed:
     trigger_id: str
     route_label: str = ""
     disruption: Optional[DisruptionForecast] = None
+    available_flights: list = field(default_factory=list)  # top 5 flight options from SerpApi
 
 
 # ── Synthetic fallbacks ───────────────────────────────────────────────────────
@@ -384,7 +513,460 @@ async def fetch_weather(
         return _neutral_weather(airport_code)
 
 
-# ── SerpApi — live Google Flights fares ───────────────────────────────────────
+# ── Shared helpers ────────────────────────────────────────────────────────────
+
+_CABIN_DUFFEL: dict[int, str] = {
+    1: "economy", 2: "premium_economy", 3: "business", 4: "first"
+}
+_CABIN_KIWI: dict[int, str] = {
+    1: "M", 2: "W", 3: "C", 4: "F"
+}
+
+
+def _fare_from_option(opt: dict, origin: str, destination: str,
+                      outbound: str, return_date: Optional[str],
+                      trip_type: str, cabin_class: int, source: str) -> FareData:
+    """Build a FareData from a normalised option dict."""
+    return FareData(
+        origin=origin, destination=destination,
+        current_price_usd=opt["price_usd"], source=source,
+        departure_date=outbound, return_date=return_date,
+        trip_type=trip_type, cabin_class=cabin_class,
+        airline_name=opt.get("airline_name", ""),
+        airline_logo=opt.get("airline_logo", ""),
+        flight_number=opt.get("flight_number", ""),
+        departure_time=opt.get("departure_time", ""),
+        arrival_time=opt.get("arrival_time", ""),
+        duration_min=int(opt.get("duration_min") or 0),
+        is_direct=bool(opt.get("is_direct", True)),
+        arrives_next_day=bool(opt.get("arrives_next_day", False)),
+        origin_airport_name=opt.get("origin_airport_name", ""),
+        dest_airport_name=opt.get("dest_airport_name", ""),
+        num_stops=int(opt.get("num_stops") or 0),
+    )
+
+
+# ── Layer 1: Duffel — NDC airline fares (most accurate, bookable prices) ──────
+# Duffel connects directly to airlines via NDC — same inventory as Expedia/Kayak.
+# Flow: POST /air/offer_requests → wait for offers → parse best 5 by price.
+# Auth: Authorization: Bearer duffel_live_... (or duffel_test_... for sandbox)
+# Sign up: https://app.duffel.com/join  (free account, generate live token in dashboard)
+
+_DUFFEL_BASE = "https://api.duffel.com"
+_DUFFEL_VERSION = "v2"
+
+
+async def _fetch_duffel(
+    origin: str,
+    destination: str,
+    client: httpx.AsyncClient,
+    departure_date: Optional[str] = None,
+    return_date: Optional[str] = None,
+    trip_type: str = "one_way",
+    cabin_class: int = 1,
+) -> tuple[FareData, list[dict]] | None:
+    """Fetch fares from Duffel NDC API. Returns None if unconfigured or no results."""
+    key = Config.DUFFEL_API_KEY
+    if not key or key.startswith("FILL_IN"):
+        return None
+
+    outbound = departure_date or _next_friday()
+    cabin = _CABIN_DUFFEL.get(cabin_class, "economy")
+
+    # Build slices — one-way or round-trip
+    slices: list[dict] = [
+        {"origin": origin, "destination": destination, "departure_date": outbound}
+    ]
+    if trip_type == "round_trip" and return_date:
+        slices.append(
+            {"origin": destination, "destination": origin, "departure_date": return_date}
+        )
+
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Duffel-Version": _DUFFEL_VERSION,
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+    body = {
+        "data": {
+            "slices": slices,
+            "passengers": [{"type": "adult"}],
+            "cabin_class": cabin,
+        }
+    }
+
+    try:
+        # Step 1 — create offer request (Duffel returns 201 Created on success)
+        resp = await client.post(
+            f"{_DUFFEL_BASE}/air/offer_requests",
+            json=body,
+            headers=headers,
+            timeout=30.0,
+        )
+        if resp.status_code not in (200, 201):
+            logger.warning(f"Duffel offer_request error {resp.status_code}: {resp.text[:300]}")
+            return None
+
+        payload = resp.json()
+        request_data = payload.get("data") or {}
+        offers = request_data.get("offers") or []
+
+        # Offers are returned inline in the offer_request response.
+        # If empty (shouldn't happen in normal flow), fall back to listing endpoint.
+        if not offers:
+            req_id = request_data.get("id", "")
+            if req_id:
+                list_resp = await client.get(
+                    f"{_DUFFEL_BASE}/air/offers",
+                    params={"offer_request_id": req_id, "sort": "total_amount", "limit": 10},
+                    headers=headers,
+                    timeout=20.0,
+                )
+                if list_resp.status_code == 200:
+                    offers = list_resp.json().get("data") or []
+
+        if not offers:
+            return None
+
+        # Resolve FX rate once if account currency != USD
+        # Duffel returns prices in the account's configured currency (often GBP/EUR).
+        sample_currency = (offers[0].get("total_currency") or "USD").upper()
+        usd_rate = 1.0   # default: assume USD
+        if sample_currency != "USD":
+            try:
+                fx_resp = await client.get(FX_URL, timeout=6.0)
+                if fx_resp.status_code == 200:
+                    rates = fx_resp.json().get("rates", {})
+                    rate_to_usd = rates.get("USD", 1.0) / rates.get(sample_currency, 1.0)
+                    usd_rate = float(rate_to_usd)
+                    logger.debug(f"Duffel currency: {sample_currency} → USD rate {usd_rate:.4f}")
+            except Exception:
+                # Hardcoded emergency fallbacks
+                fallback = {"GBP": 1.27, "EUR": 1.09, "CAD": 0.74, "AUD": 0.65, "JPY": 0.0067}
+                usd_rate = fallback.get(sample_currency, 1.0)
+
+        options: list[dict] = []
+        for offer in offers:
+            try:
+                price_native = float(offer.get("total_amount") or 0)
+                if price_native <= 0:
+                    continue
+                price_usd = round(price_native * usd_rate, 2)
+
+                offer_slices = offer.get("slices") or []
+                if not offer_slices:
+                    continue
+                out_slice = offer_slices[0]
+                segments = out_slice.get("segments") or []
+                if not segments:
+                    continue
+                first_seg = segments[0]
+                last_seg  = segments[-1]
+                num_stops = max(0, len(segments) - 1)
+                carrier   = first_seg.get("marketing_carrier") or {}
+                dep_raw   = first_seg.get("departing_at", "")
+                arr_raw   = last_seg.get("arriving_at", "")
+                dep_date_str = dep_raw[:10] if dep_raw else ""
+                arr_date_str = arr_raw[:10] if arr_raw else ""
+
+                # Sum ISO-8601 durations: PT4H35M → 275 min
+                total_min = 0
+                for seg in segments:
+                    dur = seg.get("duration") or ""
+                    h_m = re.search(r'(\d+)H', dur)
+                    m_m = re.search(r'(\d+)M', dur)
+                    total_min += (int(h_m.group(1)) if h_m else 0) * 60
+                    total_min += (int(m_m.group(1)) if m_m else 0)
+
+                options.append({
+                    "airline_name":       carrier.get("name", ""),
+                    "airline_logo":       carrier.get("logo_symbol_url", ""),
+                    "flight_number":      f"{carrier.get('iata_code','')}{first_seg.get('marketing_carrier_flight_number','')}",
+                    "departure_time":     dep_raw[11:16] if len(dep_raw) >= 16 else "",
+                    "arrival_time":       arr_raw[11:16] if len(arr_raw) >= 16 else "",
+                    "duration_min":       total_min,
+                    "is_direct":          num_stops == 0,
+                    "num_stops":          num_stops,
+                    "price_usd":          price_usd,
+                    "arrives_next_day":   bool(dep_date_str and arr_date_str and dep_date_str != arr_date_str),
+                    "origin_airport_name": (out_slice.get("origin") or {}).get("name", ""),
+                    "dest_airport_name":   (out_slice.get("destination") or {}).get("name", ""),
+                    "departure_date":     outbound,
+                    "return_date":        return_date,
+                    "trip_type":          trip_type,
+                    "cabin_class":        cabin_class,
+                })
+                if len(options) >= 5:
+                    break
+            except Exception as parse_err:
+                logger.debug(f"Duffel offer parse error: {parse_err}")
+                continue
+
+        if options:
+            options.sort(key=lambda o: o["price_usd"])
+            source = "duffel" if not key.startswith("duffel_test_") else "duffel/test"
+            fare = _fare_from_option(options[0], origin, destination,
+                                     outbound, return_date, trip_type, cabin_class,
+                                     source=source)
+            logger.info(f"Duffel: {origin}→{destination} ${options[0]['price_usd']:.0f} "
+                        f"({options[0]['airline_name']}) [{len(options)} offers] [{source}]")
+            return fare, options
+
+    except Exception as e:
+        logger.warning(f"Duffel fetch failed ({origin}→{destination}): {e}")
+    return None
+
+
+# ── Layer 2: Kiwi Tequila — aggregated real fares ─────────────────────────────
+# Kiwi aggregates from GDS + direct airline connections. Good global coverage.
+# Auth: apikey header (single key, no OAuth).
+# Sign up: https://tequila.kiwi.com/portal  (free tier available)
+
+async def _fetch_kiwi(
+    origin: str,
+    destination: str,
+    client: httpx.AsyncClient,
+    departure_date: Optional[str] = None,
+    return_date: Optional[str] = None,
+    trip_type: str = "one_way",
+    cabin_class: int = 1,
+) -> tuple[FareData, list[dict]] | None:
+    """Fetch fares from Kiwi Tequila API. Returns None if unconfigured or no results."""
+    key = Config.KIWI_API_KEY
+    if not key or key.startswith("FILL_IN"):
+        return None
+
+    outbound = departure_date or _next_friday()
+    cabin = _CABIN_KIWI.get(cabin_class, "M")
+
+    def _to_kiwi_date(iso: str) -> str:
+        """Convert YYYY-MM-DD to dd/mm/yyyy expected by Kiwi."""
+        try:
+            y, m, d = iso.split("-")
+            return f"{d}/{m}/{y}"
+        except Exception:
+            return iso
+
+    params: dict = {
+        "fly_from": origin,
+        "fly_to": destination,
+        "date_from": _to_kiwi_date(outbound),
+        "date_to": _to_kiwi_date(outbound),
+        "selected_cabins": cabin,
+        "curr": "USD",
+        "limit": 5,
+        "sort": "price",
+        "asc": 1,
+        "one_for_city": 1,
+        "partner_market": _airport_gl(origin),
+    }
+    if trip_type == "round_trip" and return_date:
+        params["return_from"] = _to_kiwi_date(return_date)
+        params["return_to"] = _to_kiwi_date(return_date)
+
+    try:
+        resp = await client.get(
+            "https://api.tequila.kiwi.com/v2/search",
+            params=params,
+            headers={"apikey": key},
+            timeout=15.0,
+        )
+        resp.raise_for_status()
+        flights = resp.json().get("data") or []
+
+        options: list[dict] = []
+        for f in flights:
+            price = float(f.get("price") or 0)
+            if price <= 0:
+                continue
+            route = f.get("route") or []
+            first_seg = route[0] if route else {}
+            last_seg = route[-1] if route else {}
+            num_stops = max(0, len(route) - 1)
+            dep_raw = first_seg.get("local_departure", "")
+            arr_raw = last_seg.get("local_arrival", "")
+            dep_date_str = dep_raw[:10] if dep_raw else ""
+            arr_date_str = arr_raw[:10] if arr_raw else ""
+            duration_sec = (f.get("duration") or {}).get("departure") or 0
+            airline_code = first_seg.get("airline", "")
+            options.append({
+                "airline_name": airline_code,   # Kiwi returns IATA code; full name not in free tier
+                "airline_logo": f"https://images.kiwi.com/airlines/64/{airline_code}.png",
+                "flight_number": f"{airline_code}{first_seg.get('flight_no', '')}",
+                "departure_time": dep_raw[11:16] if len(dep_raw) >= 16 else "",
+                "arrival_time": arr_raw[11:16] if len(arr_raw) >= 16 else "",
+                "duration_min": int(duration_sec // 60) if duration_sec else 0,
+                "is_direct": num_stops == 0,
+                "num_stops": num_stops,
+                "price_usd": price,
+                "arrives_next_day": bool(dep_date_str and arr_date_str and dep_date_str != arr_date_str),
+                "origin_airport_name": first_seg.get("flyFrom", origin),
+                "dest_airport_name": last_seg.get("flyTo", destination),
+                "departure_date": outbound,
+                "return_date": return_date,
+                "trip_type": trip_type,
+                "cabin_class": cabin_class,
+            })
+            if len(options) >= 5:
+                break
+
+        if options:
+            fare = _fare_from_option(options[0], origin, destination,
+                                     outbound, return_date, trip_type, cabin_class,
+                                     source="kiwi")
+            logger.info(f"Kiwi: {origin}→{destination} ${options[0]['price_usd']:.0f} "
+                        f"({options[0]['airline_name']}) [{len(options)} results]")
+            return fare, options
+
+    except Exception as e:
+        logger.warning(f"Kiwi fetch failed ({origin}→{destination}): {e}")
+    return None
+
+
+# ── Layer 3: SerpAPI — Google Flights (locale-aware) ─────────────────────────
+
+def _flight_group_to_option(group: dict, outbound: str, return_date: Optional[str],
+                             trip_type: str, cabin_class: int,
+                             origin: str, destination: str) -> Optional[dict]:
+    """Parse a SerpApi flight group into a normalised option dict."""
+    price = group.get("price", 0)
+    if not price or price <= 0:
+        return None
+    flights_list = group.get("flights") or []
+    first_leg = flights_list[0] if flights_list else {}
+    last_leg = flights_list[-1] if flights_list else {}
+    dep_airport = first_leg.get("departure_airport", {})
+    arr_airport = last_leg.get("arrival_airport", {})
+    dep_raw = dep_airport.get("time", "")
+    arr_raw = arr_airport.get("time", "")
+    dep_date = dep_raw[:10] if dep_raw else ""
+    arr_date = arr_raw[:10] if arr_raw else ""
+    num_stops = max(0, len(flights_list) - 1)
+    return {
+        "airline_name": first_leg.get("airline", ""),
+        "airline_logo": first_leg.get("airline_logo", ""),
+        "flight_number": first_leg.get("flight_number", ""),
+        "departure_time": _parse_flight_time(dep_raw),
+        "arrival_time": _parse_flight_time(arr_raw),
+        "duration_min": int(group.get("total_duration") or 0),
+        "is_direct": num_stops == 0,
+        "num_stops": num_stops,
+        "price_usd": float(price),
+        "arrives_next_day": bool(dep_date and arr_date and dep_date != arr_date),
+        "origin_airport_name": dep_airport.get("name", ""),
+        "dest_airport_name": arr_airport.get("name", ""),
+        "departure_date": outbound,
+        "return_date": return_date,
+        "trip_type": trip_type,
+        "cabin_class": cabin_class,
+    }
+
+
+async def _fetch_serpapi(
+    origin: str,
+    destination: str,
+    client: httpx.AsyncClient,
+    departure_date: Optional[str] = None,
+    return_date: Optional[str] = None,
+    trip_type: str = "one_way",
+    cabin_class: int = 1,
+) -> tuple[FareData, list[dict]] | None:
+    """Fetch fares from SerpAPI (Google Flights). Returns None if unconfigured or no results."""
+    key = Config.SERPAPI_KEY
+    if not key or key.startswith("FILL_IN"):
+        return None
+
+    outbound = departure_date or _next_friday()
+    search_type = "1" if trip_type == "round_trip" and return_date else "2"
+    gl = _airport_gl(origin)
+    params: dict = {
+        "engine": "google_flights",
+        "departure_id": origin, "arrival_id": destination,
+        "outbound_date": outbound, "type": search_type,
+        "travel_class": cabin_class, "currency": "USD",
+        "hl": "en", "gl": gl,
+        "api_key": key,
+    }
+    if search_type == "1" and return_date:
+        params["return_date"] = return_date
+
+    try:
+        resp = await client.get("https://serpapi.com/search", params=params, timeout=15.0)
+        resp.raise_for_status()
+        data = resp.json()
+        all_groups = (data.get("best_flights") or []) + (data.get("other_flights") or [])
+
+        options: list[dict] = []
+        for grp in all_groups:
+            opt = _flight_group_to_option(grp, outbound, return_date, trip_type, cabin_class,
+                                          origin, destination)
+            if opt:
+                options.append(opt)
+            if len(options) >= 5:
+                break
+
+        if options:
+            fare = _fare_from_option(options[0], origin, destination,
+                                     outbound, return_date, trip_type, cabin_class,
+                                     source=f"serpapi/{gl}")
+            logger.info(f"SerpAPI: {origin}→{destination} ${options[0]['price_usd']:.0f} "
+                        f"({options[0]['airline_name']}) [{len(options)} results]")
+            return fare, options
+
+    except Exception as e:
+        logger.warning(f"SerpApi fetch failed ({origin}→{destination}): {e}")
+    return None
+
+
+# ── Fare fetcher — 4-layer fallback chain ─────────────────────────────────────
+
+async def _fetch_flights_raw(
+    origin: str,
+    destination: str,
+    client: httpx.AsyncClient,
+    departure_date: Optional[str] = None,
+    return_date: Optional[str] = None,
+    trip_type: str = "one_way",
+    cabin_class: int = 1,
+) -> tuple[FareData, list[dict]]:
+    """
+    Fetch fares using a 4-layer fallback chain:
+      1. Duffel  — NDC airline fares, same source as Expedia/Kayak (needs duffel_live_... key)
+      2. Kiwi    — Kiwi.com aggregated real fares (needs KIWI_API_KEY)
+      3. SerpAPI — Google Flights, locale-aware tax inclusion (needs SERPAPI_KEY)
+      4. Synthetic — hash-based estimate, flagged as estimated in UI
+
+    Configure keys in .env; any layer without a key is silently skipped.
+    """
+    outbound = departure_date or _next_friday()
+    kwargs = dict(departure_date=departure_date, return_date=return_date,
+                  trip_type=trip_type, cabin_class=cabin_class)
+
+    # Layer 1: Duffel
+    result = await _fetch_duffel(origin, destination, client, **kwargs)
+    if result:
+        return result
+
+    # Layer 2: Kiwi Tequila
+    result = await _fetch_kiwi(origin, destination, client, **kwargs)
+    if result:
+        return result
+
+    # Layer 3: SerpAPI (Google Flights)
+    result = await _fetch_serpapi(origin, destination, client, **kwargs)
+    if result:
+        return result
+
+    # Layer 4: Synthetic fallback — deterministic estimate, clearly flagged
+    logger.warning(f"All fare sources failed for {origin}→{destination} — using synthetic estimate")
+    fare = _synthetic_fare(origin, destination)
+    fare.departure_date = outbound
+    fare.return_date = return_date
+    fare.trip_type = trip_type
+    fare.cabin_class = cabin_class
+    return fare, []
+
 
 async def fetch_live_fare(
     origin: str,
@@ -395,71 +977,12 @@ async def fetch_live_fare(
     trip_type: str = "one_way",
     cabin_class: int = 1,
 ) -> FareData:
-    key = Config.SERPAPI_KEY
-    if not key or key.startswith("FILL_IN"):
-        fare = _synthetic_fare(origin, destination)
-        fare.departure_date = departure_date or _next_friday()
-        fare.trip_type = trip_type
-        fare.cabin_class = cabin_class
-        return fare
-
-    outbound = departure_date or _next_friday()
-    search_type = "1" if trip_type == "round_trip" and return_date else "2"
-
-    params: dict = {
-        "engine": "google_flights",
-        "departure_id": origin, "arrival_id": destination,
-        "outbound_date": outbound, "type": search_type,
-        "travel_class": cabin_class, "currency": "USD", "hl": "en",
-        "api_key": key,
-    }
-    if search_type == "1" and return_date:
-        params["return_date"] = return_date
-
-    try:
-        resp = await client.get("https://serpapi.com/search", params=params, timeout=15.0)
-        resp.raise_for_status()
-        data = resp.json()
-        best_flights = data.get("best_flights", []) or data.get("other_flights", [])
-        if best_flights:
-            best = best_flights[0]
-            price = best.get("price", 0)
-            if price > 0:
-                flights_list = best.get("flights", [])
-                first_leg = flights_list[0] if flights_list else {}
-                last_leg = flights_list[-1] if flights_list else {}
-                dep_airport = first_leg.get("departure_airport", {})
-                arr_airport = last_leg.get("arrival_airport", {})
-                dep_raw = dep_airport.get("time", "")
-                arr_raw = arr_airport.get("time", "")
-                num_stops = max(0, len(flights_list) - 1)
-                dep_date = dep_raw[:10] if dep_raw else ""
-                arr_date = arr_raw[:10] if arr_raw else ""
-                return FareData(
-                    origin=origin, destination=destination,
-                    current_price_usd=float(price), source="serpapi",
-                    departure_date=outbound, return_date=return_date,
-                    trip_type=trip_type, cabin_class=cabin_class,
-                    airline_name=first_leg.get("airline", ""),
-                    airline_logo=first_leg.get("airline_logo", ""),
-                    flight_number=first_leg.get("flight_number", ""),
-                    departure_time=_parse_flight_time(dep_raw),
-                    arrival_time=_parse_flight_time(arr_raw),
-                    duration_min=int(best.get("total_duration") or 0),
-                    is_direct=(num_stops == 0),
-                    arrives_next_day=bool(dep_date and arr_date and dep_date != arr_date),
-                    origin_airport_name=dep_airport.get("name", ""),
-                    dest_airport_name=arr_airport.get("name", ""),
-                    num_stops=num_stops,
-                )
-    except Exception as e:
-        logger.warning(f"SerpApi fetch failed ({origin}→{destination}): {e}")
-
-    fare = _synthetic_fare(origin, destination)
-    fare.departure_date = outbound
-    fare.return_date = return_date
-    fare.trip_type = trip_type
-    fare.cabin_class = cabin_class
+    """Backwards-compatible wrapper — returns only the best FareData."""
+    fare, _ = await _fetch_flights_raw(
+        origin, destination, client,
+        departure_date=departure_date, return_date=return_date,
+        trip_type=trip_type, cabin_class=cabin_class,
+    )
     return fare
 
 
@@ -529,20 +1052,29 @@ async def fetch_fare_history(
         )
         resp.raise_for_status()
         data = resp.json()
-        prices = data.get("data", {}).get(destination, {})
+        all_dest_data = data.get("data") or {}
+
+        # Travelpayouts returns data keyed by city code (e.g. "NYC" for JFK/LGA/EWR).
+        # Try exact airport code first, then fall back to any key in the response.
+        prices = all_dest_data.get(destination) or {}
+        if not prices and all_dest_data:
+            prices = next(iter(all_dest_data.values()), {})
+
         if prices:
             values = [v.get("price", 0) for v in prices.values() if v.get("price")]
             if values:
                 avg = sum(values) / len(values)
                 latest = values[0]
                 trend = (latest - avg) / avg if avg > 0 else 0.0
+                logger.info(f"Travelpayouts: {origin}->{destination} baseline=${avg:.0f} "
+                            f"({len(values)} data points, trend {trend*100:+.1f}%)")
                 return HistoricalFare(
                     origin=origin, destination=destination,
                     baseline_price_usd=round(avg, 2), month_avg=round(avg, 2),
                     price_trend=round(trend, 4), source="travelpayouts",
                 )
     except Exception as e:
-        logger.warning(f"Travelpayouts fetch failed ({origin}→{destination}): {e}")
+        logger.warning(f"Travelpayouts fetch failed ({origin}->{destination}): {e}")
     return _synthetic_history(origin, destination)
 
 
@@ -615,10 +1147,10 @@ async def build_live_seed(
 ) -> LiveSeed:
     """Fetch all data sources concurrently and return a unified LiveSeed."""
     async with httpx.AsyncClient() as client:
-        fare, demand, history, macro, origin_wx, dest_wx = await asyncio.gather(
-            fetch_live_fare(origin, destination, client,
-                            departure_date=departure_date, return_date=return_date,
-                            trip_type=trip_type, cabin_class=cabin_class),
+        (fare, available_flights), demand, history, macro, origin_wx, dest_wx = await asyncio.gather(
+            _fetch_flights_raw(origin, destination, client,
+                               departure_date=departure_date, return_date=return_date,
+                               trip_type=trip_type, cabin_class=cabin_class),
             fetch_route_demand(origin, destination, client),
             fetch_fare_history(origin, destination, client),
             fetch_macro(client),
@@ -637,10 +1169,35 @@ async def build_live_seed(
             source="caller_supplied",
         )
 
+    # Re-anchor synthetic history to the live fare so the "vs current fare"
+    # comparison is meaningful. The hash-based fallback ($320-670) is designed
+    # for generic North-Atlantic routes; it's wildly wrong for short-haul or
+    # domestic routes (e.g. DEL-BLR at $60). When we have a real fare but no
+    # Travelpayouts data, estimate the baseline as ±15% of the live fare using
+    # a deterministic route hash — keeps comparison within ±25% of reality.
+    if history.source == "synthetic" and fare.source not in ("synthetic",):
+        live_price = fare.current_price_usd
+        h = abs(hash(f"hist{origin}{destination}")) % 100  # deterministic 0..99
+        # factor in 0.88 … 1.12 range so baseline is ±12% of live fare
+        factor = 0.88 + (h / 100) * 0.24
+        base = round(live_price * factor, 2)
+        month_avg = round(base * 1.04, 2)          # monthly avg ~4% higher than point-in-time
+        price_trend = round((base / month_avg) - 1.0, 4)  # current vs monthly avg
+        history = HistoricalFare(
+            origin=origin, destination=destination,
+            baseline_price_usd=base, month_avg=month_avg,
+            price_trend=price_trend, source="estimated",
+        )
+        logger.info(
+            f"History re-anchored to live fare: {origin}->{destination} "
+            f"live=${live_price:.0f} baseline=${base:.0f} (factor={factor:.2f})"
+        )
+
     return LiveSeed(
         fare=fare, demand=demand, history=history, macro=macro,
         trigger_id=trigger_id, route_label=f"{origin} → {destination}",
         disruption=_build_disruption(origin_wx, dest_wx),
+        available_flights=available_flights,
     )
 
 
