@@ -23,6 +23,7 @@ WORKDIR /app
 # Copy Python venv and backend source
 COPY --from=backend-builder /app/backend/.venv /app/backend/.venv
 COPY backend/ ./backend/
+COPY locales/ ./locales/
 
 # Copy built Vue frontend to nginx html dir
 COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
